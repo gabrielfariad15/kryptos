@@ -72,7 +72,11 @@ Calibração dos testes (07/11/2026): seis sabotagens, uma por vez, e cada uma d
 
 ## QR (nucleo/src/qr.rs)
 
-- **Gerar:** crate `qrcode`, correção de erro M. O cartão de 121 caracteres sai quase sempre na versão 5, 37 × 37 módulos. Medido em 07/11/2026, com 3.000 cartões sorteados: 2.970 na versão 5 e 30 na versão 6 (41 × 41). O lado depende das chaves, então nenhum teste pode supor que dois cartões têm o mesmo tamanho. A tela recebe só a grade e desenha 4 módulos de margem clara em volta.
+- **Gerar:** crate `qrcode`, correção de erro M. O cartão de 121 caracteres sai quase sempre na versão 5, 37 × 37 módulos. Medido em 07/11/2026, com 3.000 cartões sorteados: 2.970 na versão 5 e 30 na versão 6 (41 × 41). O lado depende das chaves, então nenhum teste pode supor que dois cartões têm o mesmo tamanho.
+  - A versão 6 aparece quando o cartão tem sequências de dígitos: a segmentação automática do crate parte essas sequências em pedaços numéricos, e os cabeçalhos a mais estouram a versão 5.
+  - Forçar tudo na versão 5 (um segmento alfanumérico só, 679 dos 688 bits) foi medido em 07/11/2026 e **não entrou**: não melhorou a leitura. Com a mesma largura de imagem (495, 540 e 585 pixels), em 216 fotos degradadas por cartão, 3 cartões que iam para a versão 6 leram 630 de 648 assim e 600 de 648 forçados na versão 5.
+  - Isso é simulação. Se a leitura no celular ficar abaixo da regra de 9 em 10, a comparação certa é no aparelho.
+- A tela recebe só a grade e desenha 4 módulos de margem clara em volta.
 - **Ler:** crate `rxing`, só QR. Recebe o plano de brilho da câmera (1 byte por pixel) e o passo da linha, que a câmera pode completar além da largura. O texto achado ainda passa pela leitura estrita do cartão.
 - **Quadro vindo de fora:** o tamanho é conferido antes de qualquer cópia (mínimo 21 × 21, máximo 16 MP, buffer do tamanho que largura, altura e passo dizem). Um pânico dentro do leitor vira o erro `QR_LEITOR` em vez de derrubar o app.
 - **Na agenda:** `adicionar_contato_do_quadro` responde nada quando o quadro não tem QR (a câmera segue para o próximo) e erro quando acha um QR recusado: de outro app, adulterado ou o próprio.
