@@ -17,7 +17,11 @@
 //! 96 bytes. Quem retira confere a assinatura da chave contra a Ed25519 lida no QR
 //! (`kryptos_nucleo::sessao`); o relay não precisa conferir.
 //!
+//! Carta (a mensagem cifrada, por qualquer caminho): `carta`.
+//!
 //! Regra 8.2: o `Debug` não mostra chave, e os erros não carregam bytes recebidos.
+
+pub mod carta;
 
 use std::fmt;
 
@@ -58,6 +62,8 @@ pub enum ErroProtocolo {
     Assinatura,
     /// Dono em texto fora do formato (64 caracteres hexadecimais minúsculos).
     Dono,
+    /// Tipo de mensagem desconhecido numa carta.
+    Tipo,
 }
 
 impl ErroProtocolo {
@@ -69,6 +75,7 @@ impl ErroProtocolo {
             Self::ChaveInvalida => "PROTOCOLO_CHAVE_INVALIDA",
             Self::Assinatura => "PROTOCOLO_ASSINATURA",
             Self::Dono => "PROTOCOLO_DONO",
+            Self::Tipo => "PROTOCOLO_TIPO",
         }
     }
 }

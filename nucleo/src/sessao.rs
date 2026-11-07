@@ -1005,6 +1005,63 @@ mod testes {
         }
     }
 
+    // ---------- tamanho da carta (kryptos_protocolo::carta) ----------
+
+    /// (caracteres do texto, bytes da carta da primeira mensagem, bytes da carta de uma
+    /// mensagem comum), medido em 07/11/2026 com o vodozemac 0.11.2. Um pacote de rádio
+    /// Meshtastic leva cerca de 233 bytes de dados: a primeira mensagem cabe até 31
+    /// caracteres e a comum, pelo menos até 140 (documentacao/arquitetura/transportes.md).
+    const TAMANHOS_DA_CARTA: [(usize, usize, usize); 8] = [
+        (0, 202, 97),
+        (15, 202, 97),
+        (16, 218, 113),
+        (31, 218, 113),
+        (32, 234, 129),
+        (100, 299, 193),
+        (140, 332, 226),
+        (200, 396, 290),
+    ];
+
+    fn carta(m: &OlmMessage) -> Result<Vec<u8>, Box<dyn Error>> {
+        use kryptos_protocolo::carta::{Carta, Tipo};
+        let (tipo, mensagem) = m.to_parts();
+        let tipo = if tipo == TIPO_PRIMEIRA {
+            Tipo::Primeira
+        } else {
+            Tipo::Normal
+        };
+        Ok(Carta {
+            destinatario: [0; 32],
+            tipo,
+            mensagem,
+        }
+        .codificar()?)
+    }
+
+    #[test]
+    fn tamanho_da_carta_medido() -> R {
+        for (caracteres, primeira, comum) in TAMANHOS_DA_CARTA {
+            let mut p = par()?;
+            let texto = vec![b'x'; caracteres];
+            let avulsa = p.b.nova_chave_avulsa()?;
+            let mut sa = Sessao::abrir(&p.a, &p.b_para_a, &avulsa)?;
+            let m1 = sa.cifrar(&texto)?;
+            let (mut sb, _) = Sessao::receber_primeira(&mut p.b, &p.a_para_b, &m1)?;
+            sa.decifrar(&sb.cifrar(b"ok")?)?;
+            let m2 = sa.cifrar(&texto)?;
+            assert_eq!(
+                (carta(&m1)?.len(), carta(&m2)?.len()),
+                (primeira, comum),
+                "{caracteres} caracteres"
+            );
+            // A carta volta inteira e a mensagem dentro dela ainda abre.
+            let lida = kryptos_protocolo::carta::Carta::ler(&carta(&m2)?)?;
+            let m = ler_mensagem(TIPO_NORMAL, &lida.mensagem)?;
+            assert_eq!(sb.decifrar(&m)?.as_slice(), texto.as_slice());
+        }
+        Ok(())
+    }
+
     #[test]
     fn chave_avulsa_publicada_tem_a_mesma_chave_em_bytes() -> R {
         let mut b = Identidade::nova();
