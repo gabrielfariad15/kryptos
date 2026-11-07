@@ -1,0 +1,24 @@
+# Rust
+target/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+*.iml
+
+# Android: chaves de assinatura e caminhos locais
+local.properties
+key.properties
+*.jks
+*.keystore
+
+# Segredos (o certificado raiz PUBLICO da atestacao pode ir para o repositorio)
+.env
+segredos/
+
+# Sistema
+Thumbs.db
+desktop.ini
+.DS_Store
