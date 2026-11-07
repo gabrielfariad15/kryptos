@@ -22,3 +22,5 @@ segredos/
 Thumbs.db
 desktop.ini
 .DS_Store
+# Fatos da maquina (muda entre desktop e notebook)
+ferramentas/ambiente.json
