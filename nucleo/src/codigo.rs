@@ -27,7 +27,7 @@ use vodozemac::olm::IdentityKeys;
 const DOMINIO: &[u8] = b"KRYPTOS/codigo-de-contato/v1";
 
 /// Base32 Crockford: sem I, L, O e U, para não confundir com 1, 0 e V.
-const ALFABETO: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+pub(crate) const ALFABETO: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 const BASE: u32 = 32;
 
@@ -75,7 +75,9 @@ impl CodigoContato {
         Self::de_bytes(chaves.ed25519.as_bytes(), chaves.curve25519.as_bytes())
     }
 
-    fn de_bytes(ed25519: &[u8; 32], curve25519: &[u8; 32]) -> Self {
+    /// Código direto dos bytes das chaves. O `cartao` usa para conferir o QR antes de
+    /// aceitar a chave Ed25519 (que pode ser inválida no texto lido).
+    pub(crate) fn de_bytes(ed25519: &[u8; 32], curve25519: &[u8; 32]) -> Self {
         let mut resumo = Sha256::new();
         resumo.update(DOMINIO);
         resumo.update(ed25519);
