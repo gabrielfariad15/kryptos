@@ -1485,9 +1485,11 @@ impl SseDecode for crate::api::nucleo::MensagemNaCaixa {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_gaveta = <u8>::sse_decode(deserializer);
         let mut var_lida = <bool>::sse_decode(deserializer);
+        let mut var_remetente = <String>::sse_decode(deserializer);
         return crate::api::nucleo::MensagemNaCaixa {
             gaveta: var_gaveta,
             lida: var_lida,
+            remetente: var_remetente,
         };
     }
 }
@@ -1804,6 +1806,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::nucleo::MensagemNaCaixa {
         [
             self.gaveta.into_into_dart().into_dart(),
             self.lida.into_into_dart().into_dart(),
+            self.remetente.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -1993,6 +1996,7 @@ impl SseEncode for crate::api::nucleo::MensagemNaCaixa {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <u8>::sse_encode(self.gaveta, serializer);
         <bool>::sse_encode(self.lida, serializer);
+        <String>::sse_encode(self.remetente, serializer);
     }
 }
 

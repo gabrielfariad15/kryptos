@@ -1420,11 +1420,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MensagemNaCaixa dco_decode_mensagem_na_caixa(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return MensagemNaCaixa(
       gaveta: dco_decode_u_8(arr[0]),
       lida: dco_decode_bool(arr[1]),
+      remetente: dco_decode_String(arr[2]),
     );
   }
 
@@ -1661,7 +1662,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_gaveta = sse_decode_u_8(deserializer);
     var var_lida = sse_decode_bool(deserializer);
-    return MensagemNaCaixa(gaveta: var_gaveta, lida: var_lida);
+    var var_remetente = sse_decode_String(deserializer);
+    return MensagemNaCaixa(
+      gaveta: var_gaveta,
+      lida: var_lida,
+      remetente: var_remetente,
+    );
   }
 
   @protected
@@ -1918,6 +1924,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_8(self.gaveta, serializer);
     sse_encode_bool(self.lida, serializer);
+    sse_encode_String(self.remetente, serializer);
   }
 
   @protected

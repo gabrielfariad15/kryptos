@@ -49,16 +49,19 @@ def gaveta(numero, texto):
     return NONCE + agenda.xchacha20poly1305(hkdf(HMAC, DOMINIO_GAVETA), NONCE, claro, aad)
 
 
-def indice():
-    lugares = [(0, 0, bytes(32))] * CAPACIDADE
-    lugares[0] = (2, 1, bytes([1] * 32))     # nao lida
-    lugares[5] = (3, 2, bytes([6] * 32))     # lida
-    lugares[99] = (1, 3, bytes([100] * 32))  # reservada
-    lugares[7] = (4, 0, bytes(32))           # queimada
+def indice(versao):
+    # (estado, numero, resumo, remetente); versao 1 nao tem remetente.
+    lugares = [(0, 0, bytes(32), bytes(32))] * CAPACIDADE
+    lugares[0] = (2, 1, bytes([1] * 32), bytes([0x40] * 32))      # nao lida
+    lugares[5] = (3, 2, bytes([6] * 32), bytes([0x45] * 32))      # lida
+    lugares[99] = (1, 3, bytes([100] * 32), bytes(32))            # reservada, sem remetente
+    lugares[7] = (4, 0, bytes(32), bytes(32))                     # queimada
     claro = struct.pack("<Q", 4)
-    for estado, numero, resumo in lugares:
+    for estado, numero, resumo, remetente in lugares:
         claro += bytes([estado]) + struct.pack("<Q", numero) + resumo
-    cabecalho = b"KRYCAIXA" + bytes([1]) + NONCE
+        if versao == 2:
+            claro += remetente
+    cabecalho = b"KRYCAIXA" + bytes([versao]) + NONCE
     return cabecalho + agenda.xchacha20poly1305(
         hkdf(CHAVE_DO_COFRE, INFO_INDICE), NONCE, claro, cabecalho)
 
@@ -66,10 +69,12 @@ def indice():
 def main():
     agenda.calibrar()
     g = gaveta(7, b"Kryptos")
-    i = indice()
+    i2 = indice(2)
+    i1 = indice(1)
     print("calibracao: ok")
     print("gaveta:", len(g), hashlib.sha256(g).hexdigest())
-    print("indice:", len(i), hashlib.sha256(i).hexdigest())
+    print("indice v2:", len(i2), hashlib.sha256(i2).hexdigest())
+    print("indice v1:", len(i1), hashlib.sha256(i1).hexdigest())
 
 
 if __name__ == "__main__":

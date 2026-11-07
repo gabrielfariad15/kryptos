@@ -337,10 +337,17 @@ class MensagemNaCaixa {
   final int gaveta;
   final bool lida;
 
-  const MensagemNaCaixa({required this.gaveta, required this.lida});
+  /// Código de quem mandou, ou vazio se não se sabe (caixa antiga, sem remetente).
+  final String remetente;
+
+  const MensagemNaCaixa({
+    required this.gaveta,
+    required this.lida,
+    required this.remetente,
+  });
 
   @override
-  int get hashCode => gaveta.hashCode ^ lida.hashCode;
+  int get hashCode => gaveta.hashCode ^ lida.hashCode ^ remetente.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -348,7 +355,8 @@ class MensagemNaCaixa {
       other is MensagemNaCaixa &&
           runtimeType == other.runtimeType &&
           gaveta == other.gaveta &&
-          lida == other.lida;
+          lida == other.lida &&
+          remetente == other.remetente;
 }
 
 /// Sal novo e PIN esticado (Argon2id), para o HMAC do Keystore.

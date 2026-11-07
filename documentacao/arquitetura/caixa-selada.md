@@ -27,15 +27,17 @@ Mesma pasta do cofre (`noBackupFilesDir`). Todos existem desde a criação do co
 - **Dado autenticado:** `"KRYPTOS/gaveta/v1" || número da gaveta`. Uma gaveta copiada para outro lugar não abre.
 - **Gaveta vazia:** 65.644 bytes aleatórios. Não há cabeçalho fixo, então a vazia não se distingue da ocupada.
 
-**Índice:** `caixa.kryptos`, 4.157 bytes, cifrado com uma chave tirada da chave do cofre (`info = "KRYPTOS/caixa/v1"`), como a agenda:
+**Índice:** `caixa.kryptos`, 7.357 bytes (versão 2), cifrado com uma chave tirada da chave do cofre (`info = "KRYPTOS/caixa/v1"`), como a agenda:
 
-- `"KRYCAIXA"`, versão (1), nonce (24);
-- cifrado: próximo número (u64), seguido de 100 × (estado, número, resumo);
+- `"KRYCAIXA"`, versão (2), nonce (24);
+- cifrado: próximo número (u64), seguido de 100 × (estado, número, resumo, remetente);
 - **estado:** livre, reservada, não lida, lida ou queimada;
 - **número:** ordem de chegada (não é data);
 - **resumo:** SHA-256 da carta, para reconhecer a mesma carta entregue de novo.
+- **remetente:** a Ed25519 de quem mandou, ou zeros quando não se sabe. Assim a Central mostra de quem são as não lidas sem abrir a gaveta (decisão de 07/11/2026). Quem consegue abrir o índice já precisa do PIN e do Keystore, e com eles veria a agenda inteira; o texto continua só na gaveta.
+- **versão 1:** 4.157 bytes, sem remetente, das caixas criadas antes. Ainda é lida, com o remetente desconhecido. A gravação seguinte já sai na versão 2.
 
-Leitura estrita: estado desconhecido, gaveta sem carta com número ou resumo, número fora da faixa ou repetido, tudo isso é `CAIXA_CORROMPIDA`.
+Leitura estrita: estado desconhecido, gaveta sem carta com número, resumo ou remetente, número fora da faixa ou repetido, tamanho que não é o da versão declarada, tudo isso é `CAIXA_CORROMPIDA`.
 
 ## Chaves no Keystore
 
@@ -98,7 +100,8 @@ Só então o app confirma ao relay. Se algo falhar, a carta continua esperando: 
 O teste `vetores_conhecidos` confere o SHA-256 de uma gaveta e de um índice fixos:
 
 - **gaveta:** `0aa74af231362518b38e1a503245b8c7199f9c65161267f8adee0546f2baa33e`
-- **índice:** `9b3403a80ecb722593ac2585c1687edb0d613eb82bd6833a906ef18991721634`
+- **índice (versão 2):** `c556a24c4f402677ddf9d6f9a1b020df8c044bb580f32154e459c8f90e425af3`
+- **índice (versão 1, ainda lido):** `9b3403a80ecb722593ac2585c1687edb0d613eb82bd6833a906ef18991721634`
 
 Os mesmos valores saem do oráculo `ferramentas/oraculos/caixa.py`, sem o Rust. Ele usa o XChaCha20-Poly1305 do oráculo da agenda, que se calibra contra o rascunho draft-irtf-cfrg-xchacha-03.
 
@@ -106,7 +109,7 @@ Os mesmos valores saem do oráculo `ferramentas/oraculos/caixa.py`, sem o Rust. 
 
 - **Formato (`caixa.rs`):**
   - tamanhos fixos;
-  - índice: ida e volta; cada um dos 4.157 bytes trocado é recusado; 7 índices em claro fora das regras são recusados;
+  - índice: ida e volta; cada um dos 7.357 bytes trocado é recusado; 8 índices em claro fora das regras são recusados; o da versão 1 abre sem remetente e regravado vira versão 2;
   - gaveta:
     - ida e volta;
     - não abre com outra chave, nem em outra gaveta, nem vazia;

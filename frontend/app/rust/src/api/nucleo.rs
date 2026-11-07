@@ -297,6 +297,8 @@ pub fn caixa_desistir_da_chegada() -> anyhow::Result<()> {
 pub struct MensagemNaCaixa {
     pub gaveta: u8,
     pub lida: bool,
+    /// Código de quem mandou, ou vazio se não se sabe (caixa antiga, sem remetente).
+    pub remetente: String,
 }
 
 /// Mensagens não queimadas, na ordem de chegada.
@@ -307,6 +309,7 @@ pub fn caixa_listar() -> anyhow::Result<Vec<MensagemNaCaixa>> {
         .map(|i| MensagemNaCaixa {
             gaveta: i.gaveta,
             lida: i.lida,
+            remetente: i.remetente.map(|c| c.como_texto()).unwrap_or_default(),
         })
         .collect())
 }
@@ -596,6 +599,7 @@ mod testes {
             let lista = caixa_listar()?;
             assert_eq!(lista.len(), 1);
             assert!(!lista[0].lida);
+            assert_eq!(lista[0].remetente, codigo_a, "remetente antes de abrir");
             assert_eq!(procurar_texto(pasta.clone(), texto.clone())?.ocorrencias, 0);
 
             let pedido = caixa_pedido_de_leitura(gaveta)?;

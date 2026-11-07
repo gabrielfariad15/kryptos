@@ -682,13 +682,16 @@ pub enum Chegada {
     CaixaCheia,
 }
 
-/// Uma mensagem na caixa, sem nada do conteúdo: o remetente só aparece ao ler.
+/// Uma mensagem na caixa, sem nada do conteúdo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ItemDaCaixa {
     pub gaveta: u8,
     /// Ordem de chegada (não é data).
     pub numero: u64,
     pub lida: bool,
+    /// Quem mandou, pelo índice (decisão de 07/11/2026). `None`: índice antigo, sem
+    /// remetente, ou contato que não está mais na agenda.
+    pub remetente: Option<CodigoContato>,
 }
 
 /// Mensagem aberta para a tela.
@@ -844,6 +847,7 @@ pub fn receber_carta(bytes: &[u8]) -> Result<Chegada, ErroCaixa> {
             estado: Estado::Reservada,
             numero: novo.proximo,
             resumo,
+            remetente: Some(*contato.chaves().ed25519.as_bytes()),
         };
         novo.proximo += 1;
         trocar_indice(selo, caixa, novo)?;
@@ -896,7 +900,8 @@ pub fn desistir_da_chegada() -> Result<(), ErroCaixa> {
 
 /// Mensagens na caixa (não lidas e lidas ainda não queimadas), na ordem de chegada.
 pub fn caixa() -> Result<Vec<ItemDaCaixa>, ErroCaixa> {
-    com_caixa(|_m, _s, caixa| {
+    com_caixa(|memoria, _s, caixa| {
+        let agenda = &memoria.agenda;
         let mut itens: Vec<ItemDaCaixa> = caixa
             .indice
             .lugares
@@ -908,6 +913,13 @@ pub fn caixa() -> Result<Vec<ItemDaCaixa>, ErroCaixa> {
                     gaveta,
                     numero: l.numero,
                     lida: l.estado == Estado::Lida,
+                    remetente: l.remetente.and_then(|ed| {
+                        agenda
+                            .contatos()
+                            .iter()
+                            .find(|c| c.chaves().ed25519.as_bytes() == &ed)
+                            .map(|c| c.codigo())
+                    }),
                 })
             })
             .collect();
@@ -974,6 +986,7 @@ fn queimar(selo: &Selo, caixa: &mut Caixa, gaveta: u8) -> Result<(), ErroCaixa> 
             estado: Estado::Queimada,
             numero: 0,
             resumo: [0; 32],
+            remetente: None,
         };
         trocar_indice(selo, caixa, novo)?;
     }
@@ -1042,6 +1055,7 @@ pub fn chave_trocada(gaveta: u8) -> Result<(), ErroCaixa> {
                     estado: Estado::Livre,
                     numero: 0,
                     resumo: [0; 32],
+                    remetente: None,
                 };
                 trocar_indice(selo, caixa, novo)
             }
@@ -1854,7 +1868,8 @@ mod testes {
                 vec![ItemDaCaixa {
                     gaveta,
                     numero: 1,
-                    lida: false
+                    lida: false,
+                    remetente: Some(a.codigo_contato()),
                 }]
             );
             // selada: o texto não está no disco
