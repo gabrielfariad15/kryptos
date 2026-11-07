@@ -392,6 +392,16 @@ pub fn gravar_novo(pasta: &Path, conteudo: &[u8]) -> Resultado<()> {
     gravar_atomico(pasta, NOME_TENTATIVAS, b"0")
 }
 
+/// Troca o conteúdo do cofre que já existe (a conta mudou: chave avulsa gerada ou
+/// gasta). Mesma gravação atômica do cofre novo. Recusa se não há cofre: criar é
+/// `gravar_novo`, que confere que não existe.
+pub fn regravar(pasta: &Path, conteudo: &[u8]) -> Resultado<()> {
+    if !existe(pasta) {
+        return Err(ErroCofre::NaoExiste);
+    }
+    gravar_atomico(pasta, NOME_COFRE, conteudo)
+}
+
 pub fn ler(pasta: &Path) -> Resultado<Vec<u8>> {
     match fs::read(caminho_cofre(pasta)) {
         Ok(b) => Ok(b),
@@ -782,7 +792,16 @@ mod testes {
             );
             assert!(!pasta.join(format!("{NOME_COFRE}.novo")).exists());
             assert_eq!(ler_tentativas(&pasta)?, 0);
+            regravar(&pasta, b"conteudo-3")?;
+            assert_eq!(ler(&pasta)?, b"conteudo-3");
+            assert!(!pasta.join(format!("{NOME_COFRE}.novo")).exists());
             apagar(&pasta)?;
+            assert!(!existe(&pasta));
+            assert_eq!(
+                regravar(&pasta, b"conteudo-4").err(),
+                Some(ErroCofre::NaoExiste),
+                "regravar criou cofre"
+            );
             assert!(!existe(&pasta));
             apagar(&pasta)?; // de novo, sem nada: não é erro
             Ok(())

@@ -1,6 +1,6 @@
 # Sessão Olm — conversa entre duas pessoas, passo 1 (só o núcleo)
 
-Decidido em 07/11/2026. Código: `nucleo/src/sessao.rs`. Ainda não passa pela ponte nem aparece na tela.
+Decidido em 07/11/2026. Código: `nucleo/src/sessao.rs` (protocolo) e `nucleo/src/aparelho.rs` (conversas da identidade aberta e regravação do cofre). Ainda não passa pela ponte nem aparece na tela.
 
 ## Para que serve
 
@@ -13,10 +13,46 @@ A sessão fica só em memória, como a agenda. Quando o app fecha, a sessão som
 A escreve primeiro para B.
 
 1. B gera uma **chave avulsa**: uma chave Curve25519 de uso único, assinada com a Ed25519 de B. A assinatura cobre `KRYPTOS/chave-avulsa/v1` seguido dos 32 bytes da chave, e assim não serve para mais nada que a mesma Ed25519 assinar.
-2. A chave avulsa chega a A. **Por onde ela chega ainda não está decidido** (QR, servidor de repasse ou chave reserva). O núcleo já recebe e entrega a chave em bytes: `ChaveAvulsa::de_partes`, `chave_bytes` e `assinatura_bytes`.
+2. A chave avulsa chega a A pelo servidor de repasse (decisão abaixo). O núcleo recebe e entrega a chave em bytes: `ChaveAvulsa::de_partes`, `chave_bytes` e `assinatura_bytes`.
 3. A confere a assinatura com a Ed25519 de B lida no QR e abre a sessão (`Sessao::abrir`).
 4. A primeira mensagem de A leva o que B precisa para abrir o lado dele. B abre com `Sessao::receber_primeira`, e só aceita se a mensagem veio da Curve25519 de A lida no QR.
 5. Daí em diante, os dois lados usam `cifrar` e `decifrar`. As mensagens que A mandar antes de B responder também são "primeiras", mas B abre todas com a sessão que já abriu (`decifrar`). Se tentar abrir outra sessão com elas, a chave avulsa já foi gasta.
+
+## Por onde a chave avulsa chega (decidido em 07/11/2026)
+
+O caminho escolhido é o **servidor de repasse**, com um estoque de chaves avulsas assinadas e uma chave reserva assinada. O QR continua na versão 1, só com a identidade. É o modelo do Signal (X3DH: pré-chaves publicadas no servidor, entregues uma vez e apagadas) e do Matrix (chaves de uso único e chave reserva, MSC2732).
+
+- Só o servidor cobre B fora do ar, o contato por código à distância e a reabertura de uma conversa perdida. O QR só cobre o primeiro encontro.
+- O servidor não consegue trocar a chave: A confere a assinatura com a Ed25519 lida no QR.
+- Pôr a chave no QR quase dobraria o texto e exigiria medir a leitura de novo.
+
+O que essa escolha exige:
+
+- **Feito:** a conta com as chaves avulsas fica gravada no cofre (abaixo).
+- **Falta, no servidor:**
+  - publicar o estoque e a chave reserva, com o envio assinado pela Ed25519 do dono;
+  - entregar cada chave uma vez só;
+  - limitar as retiradas, para ninguém esgotar o estoque de propósito.
+- **Falta, no aparelho:**
+  - recusar uma primeira mensagem cuja conversa já existe;
+  - trocar a chave reserva a cada reposição. O Matrix avisa que uma mensagem feita com a chave reserva pode ser repetida enquanto a chave estiver ativa.
+- **Limite que fica:** o servidor sabe quem pediu a chave de quem, até existir o roteamento em camadas.
+
+## Chaves avulsas no cofre
+
+Uma chave avulsa só vale se a parte secreta sobreviver ao app fechar, porque o servidor guarda a parte pública até alguém pedir. O `aparelho` grava a conta no cofre a cada mudança, sempre com o disco primeiro:
+
+- **Gerar** (`nova_chave_avulsa`): gera, grava, lê de volta e só então entrega a chave. Sem cofre aberto, recusa (`COFRE_FECHADO`).
+- **Gastar** (`receber`, primeira mensagem de uma conversa nova): abre a conversa, grava a conta com a chave gasta, lê de volta e só então devolve o texto.
+  - Se a gravação falhar, a conversa é descartada e o texto não sai. Depois de reabrir o app, a mesma mensagem ainda abre, porque o cofre continua com a chave.
+  - Sem isso, uma primeira mensagem repetida depois de reabrir o app abriria de novo e mostraria outra vez um texto que já foi lido.
+- **Ler de volta:** o arquivo regravado tem de abrir com a mesma chave e trazer a mesma conta da memória, chaves avulsas incluídas (as contas são comparadas inteiras, em JSON).
+
+`receber` também trata as primeiras mensagens que A manda antes de B responder: se a mensagem é da conversa já aberta (mesmo identificador), decifra nela, sem gastar outra chave.
+
+Medido em 07/11/2026, no computador (Linux): o cofre vai de 640 bytes sem chave avulsa para 8.747 bytes com 50, e cada chave nova custa cerca de 1,1 ms em modo de distribuição (6,4 ms em debug), com gravação, `fsync` e releitura. No celular ainda não foi medido.
+
+A conta do vodozemac 0.11.2 guarda até 5.000 chaves avulsas (100 × 50, no código dele). A seguinte descarta a mais antiga, e a primeira mensagem que usar a descartada é recusada. O teste `a_conta_descarta_a_chave_avulsa_mais_antiga_depois_do_maximo` confere esse limite. O estoque publicado vai ser bem menor; o número sai na etapa do servidor.
 
 ## Versão do Olm
 
@@ -61,12 +97,21 @@ O Olm confere o MAC sobre a mensagem **recodificada**, e não sobre os bytes que
 - **Ordem baixa:** as 14 grafias como identidade do contato, como chave avulsa assinada pelo próprio contato, como identidade na primeira mensagem, como chave base e como catraca. As 70 tentativas foram recusadas por `SESSAO_CHAVE_FRACA`. O caso certo é o mesmo caminho com chaves comuns, que abre.
 - **Quem é quem:** chave avulsa assinada por outro, assinatura trocada e assinatura sem domínio. A primeira mensagem de C, que se passa por A, é recusada sem gastar a chave. Mensagem para outro aparelho também é recusada.
 - **Calibração dos testes (07/11/2026):** três sabotagens no código, uma por vez, e cada uma derrubou pelo menos um teste. Foram tiradas a conferência da assinatura, a amarração do remetente ao contato e o domínio da assinatura.
+- **Cofre (aparelho):**
+  - a chave avulsa sobrevive a fechar e abrir o app;
+  - a chave gasta continua gasta depois de reabrir;
+  - a conversa não sobrevive a fechar o app;
+  - com o cofre apagado com o app aberto, nenhuma chave é entregue e nenhum texto sai, e o cofre devolvido abre a mesma mensagem;
+  - sem cofre não se gasta chave;
+  - a varredura não acha chave avulsa secreta no cofre, e acha a mesma conta gravada em claro;
+  - a releitura recusa o arquivo de outra conta.
+- **Sabotagens do cofre (07/11/2026):** seis, uma por vez. Cinco foram pegas: receber sem gravar a chave gasta, gerar sem gravar, receber sem exigir cofre, a segunda primeira mensagem sem usar a conversa aberta e a releitura sem comparar. A sexta, regravar sem reler, fica isenta. O disco não devolve algo diferente do que acabou de ser gravado sem um gancho de falha no código de produção, e a conferência em si está calibrada pelo teste `releitura_recusa_cofre_com_outra_conta`.
 
 ## O que ainda não resolve
 
-- Por onde a chave avulsa chega a A.
+- A parte do servidor: estoque, chave reserva e limite de retirada.
 - Ponte, tela e prova no aparelho (regra 5.5). Este passo prova o protocolo com as duas contas no mesmo processo, e não a troca entre os dois celulares.
-- A conta guarda no máximo 50 chaves avulsas. A 51ª descarta a mais antiga, e a primeira mensagem que usar a descartada é recusada.
-- A chave avulsa gerada depois de abrir o cofre fica só em memória. Se o app fechar antes da primeira mensagem chegar, ela se perde.
+- A conversa fica só em memória. Depois de reabrir o app, as mensagens comuns de uma conversa anterior são recusadas (`SEM_CONVERSA`). Gravar as conversas no cofre é assunto próprio.
+- Com o cofre aberto, a chave do cofre fica na memória junto da conta, para regravar. Quem lê a memória do app já lê a conta, então isso acrescenta pouco, mas está registrado.
 - A queima (1 minuto depois da leitura) e a mensagem só em memória na tela ainda não existem. O núcleo devolve o texto em `Zeroizing`, mas a cópia que a tela fizer é assunto da etapa da queima.
 - O cartão do QR aceita qualquer Curve25519, inclusive de ordem baixa. Hoje a recusa acontece ao abrir a sessão. Recusar já na leitura do QR mexe no cartão e é assunto próprio.

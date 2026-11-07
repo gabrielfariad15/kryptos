@@ -2,6 +2,7 @@
 //! Curve25519 para combinar chaves). A parte secreta só sai deste módulo cifrada, pelo
 //! `cofre`.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::Deserialize;
@@ -45,8 +46,9 @@ impl Identidade {
         Self { conta }
     }
 
-    /// As duas chaves secretas, só para a varredura que confere que nenhuma foi parar
-    /// no disco em claro. Ficam em `Zeroizing`; a conta em JSON também.
+    /// As chaves secretas, só para a varredura que confere que nenhuma foi parar no
+    /// disco em claro: a de assinatura, a de combinar chaves e a secreta de cada chave
+    /// avulsa ainda não gasta (`sessao`). Ficam em `Zeroizing`; a conta em JSON também.
     pub fn segredos_para_varredura(&self) -> Result<Vec<Zeroizing<Vec<u8>>>, serde_json::Error> {
         #[derive(Deserialize)]
         enum Assinatura {
@@ -54,19 +56,40 @@ impl Identidade {
             Expanded(Vec<u8>),
         }
         #[derive(Deserialize)]
+        struct Avulsas {
+            private_keys: BTreeMap<String, Vec<u8>>,
+        }
+        #[derive(Deserialize)]
         struct Segredos {
             signing_key: Assinatura,
             diffie_hellman_key: Vec<u8>,
+            one_time_keys: Avulsas,
         }
         let json = Zeroizing::new(serde_json::to_vec(&self.conta.pickle())?);
         let s: Segredos = serde_json::from_slice(&json)?;
         let assinatura = match s.signing_key {
             Assinatura::Normal(b) | Assinatura::Expanded(b) => b,
         };
-        Ok(vec![
+        let mut segredos = vec![
             Zeroizing::new(assinatura),
             Zeroizing::new(s.diffie_hellman_key),
-        ])
+        ];
+        segredos.extend(
+            s.one_time_keys
+                .private_keys
+                .into_values()
+                .map(Zeroizing::new),
+        );
+        Ok(segredos)
+    }
+
+    /// Mesma conta, com as mesmas chaves avulsas: compara as duas contas inteiras em
+    /// JSON (os mapas da conta são ordenados, então o JSON é estável). Serve para
+    /// provar, lendo de volta, que o cofre gravado é a conta da memória.
+    pub(crate) fn mesma_conta_que(&self, outra: &Identidade) -> Result<bool, serde_json::Error> {
+        let a = Zeroizing::new(serde_json::to_vec(&self.conta.pickle())?);
+        let b = Zeroizing::new(serde_json::to_vec(&outra.conta.pickle())?);
+        Ok(a.as_slice() == b.as_slice())
     }
 
     #[cfg(test)]
@@ -127,6 +150,48 @@ mod testes {
             assert_ne!(s.as_slice(), publicas.curve25519.as_bytes());
         }
         assert_ne!(segredos[0].as_slice(), segredos[1].as_slice());
+        Ok(())
+    }
+
+    #[test]
+    fn chaves_avulsas_entram_na_varredura_e_a_gasta_sai() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut identidade = Identidade::nova();
+        assert_eq!(identidade.segredos_para_varredura()?.len(), 2);
+        let avulsas = [
+            identidade.nova_chave_avulsa()?,
+            identidade.nova_chave_avulsa()?,
+            identidade.nova_chave_avulsa()?,
+        ];
+        let segredos = identidade.segredos_para_varredura()?;
+        assert_eq!(segredos.len(), 5);
+        // Cada secreta corresponde a uma das públicas entregues, e nenhuma é a pública.
+        let publicas: Vec<[u8; 32]> = avulsas.iter().map(|a| a.chave_bytes()).collect();
+        for s in &segredos[2..] {
+            let secreta: [u8; 32] = s.as_slice().try_into()?;
+            let publica = vodozemac::Curve25519PublicKey::from(
+                &vodozemac::Curve25519SecretKey::from_slice(&secreta),
+            )
+            .to_bytes();
+            assert!(publicas.contains(&publica), "secreta sem pública entregue");
+            assert!(!publicas.contains(&secreta));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mesma_conta_so_com_as_mesmas_chaves_avulsas() -> Result<(), Box<dyn std::error::Error>> {
+        let mut a = Identidade::nova();
+        let copia = Identidade::de_pickle_json(&String::from_utf8(
+            a.pickle_em_claro_para_teste()?.to_vec(),
+        )?)?;
+        assert!(a.mesma_conta_que(&copia)?);
+        a.nova_chave_avulsa()?;
+        assert!(
+            !a.mesma_conta_que(&copia)?,
+            "chave avulsa nova não mudou a conta"
+        );
+        assert!(!a.mesma_conta_que(&Identidade::nova())?);
         Ok(())
     }
 

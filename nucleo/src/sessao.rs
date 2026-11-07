@@ -37,6 +37,10 @@ use crate::identidade::Identidade;
 /// assinar no futuro. Mudar o formato exige trocar o `v1`.
 const DOMINIO_CHAVE_AVULSA: &[u8] = b"KRYPTOS/chave-avulsa/v1";
 
+/// Chaves avulsas que a conta do vodozemac 0.11.2 guarda (100 × 50, no código dele).
+/// O teste `a_conta_descarta_a_chave_avulsa_mais_antiga_depois_do_maximo` confere.
+pub const MAXIMO_CHAVES_AVULSAS: usize = 5_000;
+
 /// Tamanho da assinatura Ed25519.
 pub const BYTES_ASSINATURA: usize = Ed25519Signature::LENGTH;
 
@@ -189,8 +193,9 @@ impl fmt::Debug for ChaveAvulsa {
 
 impl Identidade {
     /// Gera uma chave avulsa nova, assinada por esta identidade, e a marca como
-    /// publicada. A parte secreta fica na conta, em memória, até a primeira mensagem
-    /// que a usar. A conta guarda no máximo 50; a 51ª descarta a mais antiga.
+    /// publicada. A parte secreta fica na conta até a primeira mensagem que a usar. A
+    /// conta do vodozemac 0.11.2 guarda no máximo `MAXIMO_CHAVES_AVULSAS`; a seguinte
+    /// descarta a mais antiga, e a primeira mensagem que usar a descartada é recusada.
     pub fn nova_chave_avulsa(&mut self) -> Result<ChaveAvulsa, ErroSessao> {
         let conta = self.conta_mut();
         let gerada = conta.generate_one_time_keys(1);
@@ -878,6 +883,36 @@ mod testes {
         unicos.dedup();
         assert_eq!(unicos.len(), todos.len());
         assert!(todos.iter().all(|c| c.starts_with("SESSAO_")));
+    }
+
+    #[test]
+    fn a_conta_descarta_a_chave_avulsa_mais_antiga_depois_do_maximo() -> R {
+        let mut p = par()?;
+        let primeira = p.b.nova_chave_avulsa()?;
+        let segunda = p.b.nova_chave_avulsa()?;
+        for _ in 2..MAXIMO_CHAVES_AVULSAS {
+            p.b.nova_chave_avulsa()?;
+        }
+        // No máximo: todas guardadas (2 segredos da identidade + as avulsas).
+        assert_eq!(
+            p.b.segredos_para_varredura()?.len(),
+            2 + MAXIMO_CHAVES_AVULSAS
+        );
+        let alem = p.b.nova_chave_avulsa()?;
+        assert_eq!(
+            p.b.segredos_para_varredura()?.len(),
+            2 + MAXIMO_CHAVES_AVULSAS
+        );
+        for (avulsa, abre) in [(primeira, false), (segunda, true), (alem, true)] {
+            let m = Sessao::abrir(&p.a, &p.b_para_a, &avulsa)?.cifrar(b"x")?;
+            let r = Sessao::receber_primeira(&mut p.b, &p.a_para_b, &m);
+            if abre {
+                r?;
+            } else {
+                assert_eq!(r.err(), Some(ErroSessao::ChaveAvulsaDesconhecida));
+            }
+        }
+        Ok(())
     }
 
     #[test]

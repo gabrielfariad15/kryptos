@@ -67,6 +67,10 @@ Abrir (aberturas seguintes):
 
 O PIN, o resultado do Argon2id e a chave do Keystore passam pelo Dart em `Uint8List` e são zerados depois do uso. O núcleo recebe em `Zeroizing`.
 
+## Regravar (chaves avulsas)
+
+Com o cofre aberto, o `aparelho` guarda na memória a chave do cofre, o sal e o custo, e regrava a conta quando ela muda: chave avulsa gerada ou gasta. A regravação tem nonce novo, mesma gravação atômica (`cofre::regravar`, que recusa se não há cofre) e releitura que compara a conta inteira. Regras e medidas: `documentacao/arquitetura/sessao-olm.md`, seção "Chaves avulsas no cofre".
+
 ## Vetores conhecidos
 
 Calculados por `ferramentas/oraculos/cofre.py` (argon2-cffi, que usa a implementação de referência em C, e a biblioteca `cryptography`), sem o código Rust, e conferidos pelos testes `vetor_conhecido_*` de `cofre.rs`:
@@ -78,7 +82,7 @@ Calculados por `ferramentas/oraculos/cofre.py` (argon2-cffi, que usa a implement
 ## Como é provado
 
 - Núcleo: vetores conhecidos; cada bit do arquivo alterado é recusado; arquivo cortado em cada posição dá erro sem pânico; chave errada não abre; custo adulterado é recusado antes do Argon2id; contador apagado não zera a espera.
-- Varredura: procura as duas chaves secretas em 8 formas (bytes, hex maiúsculo e minúsculo, 4 variantes de base64, lista JSON). Calibrada contra os casos certos (acha cada forma plantada; acha a conta gravada em claro) e o errado (não acha nada no cofre).
+- Varredura: procura as chaves secretas (as duas da identidade e a de cada chave avulsa ainda não gasta) em 8 formas (bytes, hex maiúsculo e minúsculo, 4 variantes de base64, lista JSON). Calibrada contra os casos certos (acha cada forma plantada; acha a conta gravada em claro) e o errado (não acha nada no cofre).
 - No aparelho (`integration_test/cofre_test.dart`): criar, tirar da memória e abrir devolve o mesmo código; PIN errado não abre; sem a chave do Keystore não abre; a chave está no hardware; a varredura da pasta inteira do app dá zero.
 
 ## O que não resolve
@@ -87,6 +91,7 @@ Calculados por `ferramentas/oraculos/cofre.py` (argon2-cffi, que usa a implement
 - **Esqueceu o PIN, perdeu a identidade.** Não há recuperação, porque não há conta em servidor.
 - **Limpar os dados do app ou desinstalar** apaga a chave do Keystore, e o cofre não abre mais. A tela avisa (`CHAVE_AUSENTE`), mas ainda não há saída para recomeçar a identidade: é assunto à parte (junto do "apagar tudo").
 - **Memória:** com o cofre aberto, a conta fica na memória do processo. Quem lê a memória do app (root, depurador) lê a chave. O Dart não garante que cópias antigas dos bytes sumiram antes do coletor de lixo passar. Em especial, o HMAC chega do canal do Android somente leitura: o app zera a cópia que faz, mas o original fica até o coletor passar.
+- **Chave do cofre na memória:** com o cofre aberto, ela fica na memória para regravar. Quem lê a memória do app já lê a conta, então o risco a mais é pequeno.
 - **A varredura não procura o PIN**, porque 6 dígitos aparecem por acaso em qualquer arquivo binário.
 - **iPhone e computadores:** não têm este Keystore. Fica para quando chegar a vez deles.
 - **Trocar de aparelho:** a identidade não sai do aparelho, por decisão. Aparelho novo é identidade nova.

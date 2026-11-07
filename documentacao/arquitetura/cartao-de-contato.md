@@ -72,7 +72,7 @@ Calibração dos testes (07/11/2026): seis sabotagens, uma por vez, e cada uma d
 
 ## QR (nucleo/src/qr.rs)
 
-- **Gerar:** crate `qrcode`, correção de erro M. O cartão de 121 caracteres sai na versão 5, 37 × 37 módulos. A tela recebe só a grade e desenha 4 módulos de margem clara em volta.
+- **Gerar:** crate `qrcode`, correção de erro M. O cartão de 121 caracteres sai quase sempre na versão 5, 37 × 37 módulos. Medido em 07/11/2026, com 3.000 cartões sorteados: 2.970 na versão 5 e 30 na versão 6 (41 × 41). O lado depende das chaves, então nenhum teste pode supor que dois cartões têm o mesmo tamanho. A tela recebe só a grade e desenha 4 módulos de margem clara em volta.
 - **Ler:** crate `rxing`, só QR. Recebe o plano de brilho da câmera (1 byte por pixel) e o passo da linha, que a câmera pode completar além da largura. O texto achado ainda passa pela leitura estrita do cartão.
 - **Quadro vindo de fora:** o tamanho é conferido antes de qualquer cópia (mínimo 21 × 21, máximo 16 MP, buffer do tamanho que largura, altura e passo dizem). Um pânico dentro do leitor vira o erro `QR_LEITOR` em vez de derrubar o app.
 - **Na agenda:** `adicionar_contato_do_quadro` responde nada quando o quadro não tem QR (a câmera segue para o próximo) e erro quando acha um QR recusado: de outro app, adulterado ou o próprio.

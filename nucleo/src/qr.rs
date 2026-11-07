@@ -273,9 +273,12 @@ pub(crate) mod testes {
         CartaoContato::de_chaves(&Identidade::nova().chaves_publicas())
     }
 
+    /// No cartão do vetor. Um cartão sorteado sai na versão 6 (41 módulos) em cerca de
+    /// 1 de cada 100: medido 30 de 3.000 em 07/11/2026. Por isso o tamanho é conferido
+    /// num cartão fixo.
     #[test]
-    fn grade_do_cartao_e_versao_5_com_37_modulos() -> Result<(), ErroQr> {
-        let grade = grade_do_cartao(&cartao_novo())?;
+    fn grade_do_cartao_e_versao_5_com_37_modulos() -> Result<(), Box<dyn std::error::Error>> {
+        let grade = grade_do_cartao(&CartaoContato::ler(crate::cartao::testes::CARTAO_DO_VETOR)?)?;
         assert_eq!(grade.lado(), 37);
         assert_eq!(grade.modulos().len(), 37 * 37);
         // Os três quadrados de posição: canto (0,0) escuro, (7,7) claro (separador).
@@ -447,7 +450,11 @@ pub(crate) mod testes {
     #[test]
     fn debug_da_grade_nao_mostra_os_modulos() -> Result<(), ErroQr> {
         let grade = grade_do_cartao(&cartao_novo())?;
-        assert_eq!(format!("{grade:?}"), "GradeQr(37x37, oculta)");
+        let lado = grade.lado();
+        assert_eq!(
+            format!("{grade:?}"),
+            format!("GradeQr({lado}x{lado}, oculta)")
+        );
         Ok(())
     }
 
