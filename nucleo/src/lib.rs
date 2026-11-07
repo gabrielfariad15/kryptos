@@ -8,9 +8,10 @@
 //! - `cofre`: a identidade gravada cifrada (PIN + Keystore).
 //! - `aparelho`: guarda a identidade desta execução e conduz o cofre; a chave não
 //!   atravessa a ponte.
+//! - `sessao`: a conversa entre duas pessoas (Olm), só entre contatos conferidos por QR.
 //!
-//! Protocolo e queima entram nas próximas etapas, cada uma com teste de vetor
-//! conhecido e teste de adulteração (regra 8.4).
+//! A queima entra numa próxima etapa, com teste de vetor conhecido e teste de
+//! adulteração (regra 8.4).
 
 pub mod aparelho;
 pub mod cartao;
@@ -19,11 +20,13 @@ pub mod cofre;
 pub mod contatos;
 pub mod identidade;
 pub mod qr;
+pub mod sessao;
 
 pub use cartao::{CartaoContato, ErroCartao};
 pub use codigo::{CodigoContato, ErroCodigo};
 pub use contatos::{Adicao, Conferencia, Contato, ErroAgenda};
 pub use qr::{ErroQr, GradeQr};
+pub use sessao::{ChaveAvulsa, ErroSessao, Sessao};
 
 /// Versão do núcleo, tirada do `Cargo.toml` na compilação.
 pub fn versao() -> &'static str {

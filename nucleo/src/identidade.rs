@@ -35,6 +35,12 @@ impl Identidade {
         &self.conta
     }
 
+    /// Para gerar chave avulsa e abrir a sessão de quem escreveu primeiro
+    /// (`sessao`), que mudam a conta.
+    pub(crate) fn conta_mut(&mut self) -> &mut Account {
+        &mut self.conta
+    }
+
     pub(crate) fn de_conta(conta: Account) -> Self {
         Self { conta }
     }
