@@ -248,6 +248,27 @@ impl Identidade {
         p.codificar(&assinatura.to_bytes())
             .map_err(|_| ErroSessao::DemaisChaves)
     }
+
+    /// Busca assinada no malote do relay (`kryptos_protocolo::malote`): confirma as
+    /// cartas já guardadas (`confirmadas`) e pede as próximas. `numero` tem de ser
+    /// maior que o da última busca aceita; se não for, o relay responde
+    /// `NUMERO_VELHO <último>`.
+    pub fn busca(
+        &self,
+        numero: u64,
+        confirmadas: Vec<[u8; kryptos_protocolo::malote::BYTES_ID]>,
+    ) -> Result<Vec<u8>, ErroSessao> {
+        let b = kryptos_protocolo::malote::Busca {
+            destinatario: *self.chaves_publicas().ed25519.as_bytes(),
+            numero,
+            confirmadas,
+        };
+        let assinatura = self
+            .conta()
+            .sign(b.para_assinar().map_err(|_| ErroSessao::DemaisChaves)?);
+        b.codificar(&assinatura.to_bytes())
+            .map_err(|_| ErroSessao::DemaisChaves)
+    }
 }
 
 /// Lê uma mensagem que chegou de fora: tipo (`TIPO_PRIMEIRA` ou `TIPO_NORMAL`) e bytes.
@@ -978,6 +999,30 @@ mod testes {
         let consulta = kryptos_protocolo::Publicacao::conferir(&p.b.publicacao(0, 43)?)?;
         assert!(consulta.chaves.is_empty());
         assert_eq!(p.b.segredos_para_varredura()?.len(), antes);
+        Ok(())
+    }
+
+    #[test]
+    fn busca_assinada_confere_no_relay() -> R {
+        let b = Identidade::nova();
+        let ids = vec![[1u8; 16], [2u8; 16]];
+        let bytes = b.busca(9, ids.clone())?;
+        let lida = kryptos_protocolo::malote::Busca::conferir(&bytes)?;
+        assert_eq!(&lida.destinatario, b.chaves_publicas().ed25519.as_bytes());
+        assert_eq!((lida.numero, lida.confirmadas), (9, ids));
+        // assinada por outra identidade com o destinatário trocado: recusada
+        let outra = Identidade::nova();
+        let mut falsa = outra.busca(9, vec![])?;
+        falsa[1..33].copy_from_slice(b.chaves_publicas().ed25519.as_bytes());
+        assert!(kryptos_protocolo::malote::Busca::conferir(&falsa).is_err());
+        assert_eq!(
+            b.busca(
+                1,
+                vec![[0u8; 16]; kryptos_protocolo::malote::MAXIMO_CONFIRMADAS + 1]
+            )
+            .err(),
+            Some(ErroSessao::DemaisChaves)
+        );
         Ok(())
     }
 

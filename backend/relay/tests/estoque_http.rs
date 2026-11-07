@@ -70,7 +70,7 @@ fn contato(eu: &Identidade, quem: &Identidade) -> Result<Contato, Box<dyn std::e
 
 #[tokio::test]
 async fn b_publica_a_retira_e_a_conversa_abre() -> R {
-    let rotas = kryptos_relay::rotas();
+    let rotas = kryptos_relay::rotas()?;
     let mut b = Identidade::nova();
     let a = Identidade::nova();
 
@@ -100,7 +100,7 @@ async fn b_publica_a_retira_e_a_conversa_abre() -> R {
 
 #[tokio::test]
 async fn cada_chave_sai_uma_vez_e_depois_falta() -> R {
-    let rotas = kryptos_relay::rotas();
+    let rotas = kryptos_relay::rotas()?;
     let mut b = Identidade::nova();
     pedir(&rotas, "POST", "/v1/publicar", b.publicacao(2, 1)?).await?;
     let um = pedir(&rotas, "POST", &caminho_de_retirada(&b), Vec::new()).await?;
@@ -125,7 +125,7 @@ async fn cada_chave_sai_uma_vez_e_depois_falta() -> R {
 /// A publicação copiada e reenviada é recusada pelo número.
 #[tokio::test]
 async fn publicacao_repetida_e_recusada_e_devolve_o_ultimo_numero() -> R {
-    let rotas = kryptos_relay::rotas();
+    let rotas = kryptos_relay::rotas()?;
     let mut b = Identidade::nova();
     let publicacao = b.publicacao(1, 7)?;
     pedir(&rotas, "POST", "/v1/publicar", publicacao.clone()).await?;
@@ -141,7 +141,7 @@ async fn publicacao_repetida_e_recusada_e_devolve_o_ultimo_numero() -> R {
 
 #[tokio::test]
 async fn publicacao_adulterada_ou_fora_do_formato_e_recusada() -> R {
-    let rotas = kryptos_relay::rotas();
+    let rotas = kryptos_relay::rotas()?;
     let mut b = Identidade::nova();
     let original = b.publicacao(1, 1)?;
     // Posição 33: primeiro byte do número (depois da versão e dos 32 do dono).
@@ -188,7 +188,7 @@ async fn publicacao_adulterada_ou_fora_do_formato_e_recusada() -> R {
 
 #[tokio::test]
 async fn limite_por_destinatario_responde_429_com_espera() -> R {
-    let rotas = kryptos_relay::rotas();
+    let rotas = kryptos_relay::rotas()?;
     let mut b = Identidade::nova();
     pedir(&rotas, "POST", "/v1/publicar", b.publicacao(20, 1)?).await?;
     for _ in 0..kryptos_relay::estoque::RETIRADAS_SEGUIDAS {
@@ -215,7 +215,7 @@ async fn limite_por_destinatario_responde_429_com_espera() -> R {
 
 #[tokio::test]
 async fn dono_fora_do_formato_e_metodo_errado() -> R {
-    let rotas = kryptos_relay::rotas();
+    let rotas = kryptos_relay::rotas()?;
     let r = pedir(&rotas, "POST", "/v1/retirar/abc", Vec::new()).await?;
     assert_eq!(
         (r.status, r.texto()),

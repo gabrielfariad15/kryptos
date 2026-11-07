@@ -505,6 +505,17 @@ pub fn preparar_publicacao(quantas: usize, numero: u64) -> Result<Vec<u8>, ErroC
     Ok(publicacao)
 }
 
+/// Busca assinada para o malote do relay: confirma `confirmadas` e pede as próximas
+/// cartas. Não precisa do cofre: só assina.
+pub fn preparar_busca(
+    numero: u64,
+    confirmadas: Vec<[u8; kryptos_protocolo::malote::BYTES_ID]>,
+) -> Result<Vec<u8>, ErroConversa> {
+    let guarda = trava();
+    let memoria = guarda.as_ref().ok_or(ErroConversa::SemIdentidade)?;
+    Ok(memoria.identidade.busca(numero, confirmadas)?)
+}
+
 /// A abre a conversa com um contato da agenda, com a chave avulsa dele. Substitui a
 /// conversa anterior com o mesmo contato, se houver.
 pub fn abrir_conversa(codigo: CodigoContato, avulsa: &ChaveAvulsa) -> Result<(), ErroConversa> {

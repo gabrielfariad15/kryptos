@@ -10,6 +10,7 @@ use tower::ServiceExt;
 
 async fn pedir(metodo: &str, caminho: &str) -> (StatusCode, String) {
     let resposta = kryptos_relay::rotas()
+        .unwrap()
         .oneshot(
             Request::builder()
                 .method(metodo)

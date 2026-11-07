@@ -19,9 +19,12 @@
 //!
 //! Carta (a mensagem cifrada, por qualquer caminho): `carta`.
 //!
+//! Malote (cartas esperando o destinatário no relay; busca assinada e entrega): `malote`.
+//!
 //! Regra 8.2: o `Debug` não mostra chave, e os erros não carregam bytes recebidos.
 
 pub mod carta;
+pub mod malote;
 
 use std::fmt;
 
@@ -64,6 +67,8 @@ pub enum ErroProtocolo {
     Dono,
     /// Tipo de mensagem desconhecido numa carta.
     Tipo,
+    /// O mesmo id duas vezes numa busca ou numa entrega do malote.
+    Repetida,
 }
 
 impl ErroProtocolo {
@@ -76,6 +81,7 @@ impl ErroProtocolo {
             Self::Assinatura => "PROTOCOLO_ASSINATURA",
             Self::Dono => "PROTOCOLO_DONO",
             Self::Tipo => "PROTOCOLO_TIPO",
+            Self::Repetida => "PROTOCOLO_REPETIDA",
         }
     }
 }

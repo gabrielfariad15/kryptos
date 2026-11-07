@@ -19,12 +19,16 @@ axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+redb.workspace = true
+getrandom.workspace = true
 
 [dev-dependencies]
 # Só nos testes: o caminho inteiro, do dono que publica a quem abre a conversa.
 kryptos_nucleo.workspace = true
 tower.workspace = true
 http-body-util.workspace = true
+# O tipo da mensagem Olm no teste do malote (ja vinha pelo protocolo).
+vodozemac.workspace = true
 
 [lints]
 workspace = true
