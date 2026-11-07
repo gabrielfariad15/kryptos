@@ -1,24 +1,31 @@
 # ferramentas/instalar-no-celular.ps1
 # Compila o app (debug, arm64) uma vez, instala no(s) celular(es) ligado(s) no cabo,
-# abre, confere o logcat e tira uma captura da tela de cada um. A captura e a prova
-# de que a tela abriu (regra 5.5). Tambem informa tamanho e densidade da tela, que
-# entram nos testes de layout.
+# abre, confere o logcat e tira uma captura da tela de cada um. Tambem informa tamanho
+# e densidade da tela, que entram nos testes de layout.
 #
 # Uso (uma linha):
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Serial <serial>
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay
 #
 # Sem parametro: exige um unico celular no cabo. Com mais de um, use -Todos ou -Serial.
 #
+# -Relay: o teste com os dois celulares. Sobe o relay de teste nesta maquina (so em
+# 127.0.0.1, malote na memoria), monta o app com o endereco dele, liga a porta a cada
+# celular pelo adb reverse e fica esperando o Enter enquanto o teste e feito na mao.
+# No fim desliga o relay e desfaz os reverses. Os celulares ficam no cabo o tempo todo.
+#
+# Captura: o app tem FLAG_SECURE, entao o centro da captura tem de sair preto. Isso e
+# conferido (a barra de status e a de navegacao sao do sistema e aparecem). A prova de
+# que a tela abriu passa a ser o processo vivo, o logcat limpo e a conferencia a olho.
 # Saida: capturas em Downloads com nome unico (kryptos-tela-<modelo>-AAAAMMDD-HHMMSS.png).
-# Quando o bloqueio de print (FLAG_SECURE) entrar no app, a captura vai sair preta:
-# ai a prova passa a ser so a conferencia a olho.
 
 [CmdletBinding()]
 param(
     [switch]$Todos,
-    [string]$Serial
+    [string]$Serial,
+    [switch]$Relay
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +39,13 @@ $Amb = Get-Content -LiteralPath $arqAmb -Raw -Encoding UTF8 | ConvertFrom-Json
 
 $Pacote = 'com.torionsystems.kryptos'
 $resultados = New-Object System.Collections.Generic.List[string]
+
+# Porta do relay de teste, a mesma da suite. Estimo que esteja livre; se nao estiver,
+# o relay para ao subir e o script diz.
+$portaRelay = 18080
+$procRelay = $null
+$logsRelay = @()
+$comReverse = New-Object System.Collections.Generic.List[string]
 
 function Rodar([string]$Exe, [string[]]$Argumentos) {
     $antes = $ErrorActionPreference
@@ -103,14 +117,49 @@ try {
         if ($t -match 'OK\s+versao do Rust: (\S+)') { "$($Matches[1]) na suite e no celular" }
     }
 
+    # ---------- relay de teste (so com -Relay) ----------
+    if ($Relay) {
+        Passo 'relay de teste nesta maquina' {
+            Set-Location -LiteralPath $Repo
+            Rodar 'cargo' @('build', '-p', 'kryptos_relay') | Out-Null
+            $exeRelay = Achar (Join-Path (Join-Path $Repo 'target') 'debug') @('kryptos_relay.exe', 'kryptos_relay')
+            $base = Join-Path ([System.IO.Path]::GetTempPath()) ('kryptos-relay-' + [guid]::NewGuid().ToString('N'))
+            $script:logsRelay = @("$base.log", "$base.err")
+            $env:KRYPTOS_RELAY_ENDERECO = "127.0.0.1:$portaRelay"
+            try {
+                $script:procRelay = Start-Process -FilePath $exeRelay -PassThru -NoNewWindow `
+                    -RedirectStandardOutput $script:logsRelay[0] -RedirectStandardError $script:logsRelay[1]
+            } finally {
+                Remove-Item Env:\KRYPTOS_RELAY_ENDERECO -ErrorAction SilentlyContinue
+            }
+            # Espera o /saude ate 10 s. Cada tentativa que falha so quer dizer "ainda nao
+            # subiu"; se nao subir, a falha sai abaixo com o motivo.
+            $pronto = $false
+            for ($i = 0; $i -lt 50 -and -not $pronto; $i++) {
+                if ($script:procRelay.HasExited) { throw "o relay de teste parou ao subir (porta $portaRelay ocupada?)" }
+                try {
+                    $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$portaRelay/saude" -TimeoutSec 2
+                    if ($r.StatusCode -eq 200) { $pronto = $true }
+                } catch {
+                    Start-Sleep -Milliseconds 200
+                }
+            }
+            if (-not $pronto) { throw "o relay de teste nao respondeu em 10 s na porta $portaRelay" }
+            "127.0.0.1:$portaRelay, malote na memoria"
+        }
+    }
+
     # ---------- compilar uma vez ----------
     $apk = Join-Path $app 'build\app\outputs\flutter-apk\app-debug.apk'
     Passo 'compilar APK de debug (arm64)' {
         Set-Location -LiteralPath $app
         Write-Host '   Gradle + Rust para Android; a primeira vez demora'
-        Rodar $flutter @('build', 'apk', '--debug', '--target-platform', 'android-arm64') | Out-Null
+        $argsBuild = @('build', 'apk', '--debug', '--target-platform', 'android-arm64')
+        if ($Relay) { $argsBuild += "--dart-define=KRYPTOS_RELAY=http://127.0.0.1:$portaRelay" }
+        Rodar $flutter $argsBuild | Out-Null
         if (-not (Test-Path -LiteralPath $apk)) { throw "o build terminou mas nao achei $apk" }
-        "$([math]::Round((Get-Item -LiteralPath $apk).Length / 1MB, 1)) MB"
+        $comRelay = if ($Relay) { 'com o relay de teste' } else { 'sem relay' }
+        "$([math]::Round((Get-Item -LiteralPath $apk).Length / 1MB, 1)) MB, $comRelay"
     }
 
     # ---------- em cada celular ----------
@@ -147,6 +196,14 @@ try {
             'camera sim; microfone e armazenamento nao'
         }
 
+        if ($Relay) {
+            Passo "$modeloAtual : porta do relay" {
+                Rodar $adb @('-s', $s, 'reverse', "tcp:$portaRelay", "tcp:$portaRelay") | Out-Null
+                $comReverse.Add($s)
+                "tcp:$portaRelay do celular -> tcp:$portaRelay desta maquina"
+            }
+        }
+
         Passo "$modeloAtual : abrir o app" {
             try { Rodar $adb @('-s', $s, 'logcat', '-c') | Out-Null } catch { Write-Host "   aviso: nao limpei o logcat; a conferencia pode pegar erro antigo" }
             Rodar $adb @('-s', $s, 'shell', 'am', 'start', '-W', '-n', "$Pacote/.MainActivity") | Out-Null
@@ -176,14 +233,52 @@ try {
             finally { try { Rodar $adb @('-s', $s, 'shell', 'rm', '-f', $remoto) | Out-Null } catch { Write-Host "   aviso: nao apaguei $remoto do celular: $($_.Exception.Message)" } }
             $b = [System.IO.File]::ReadAllBytes($destino)
             if ($b.Length -lt 8 -or $b[0] -ne 0x89 -or $b[1] -ne 0x50 -or $b[2] -ne 0x4E -or $b[3] -ne 0x47) { throw "$destino nao e um PNG valido" }
-            "$destino, $([math]::Round($b.Length / 1KB)) KB"
+            # FLAG_SECURE: o centro (de 20% a 80% da altura, fora das barras do sistema)
+            # sai preto. Amostra de 40 x 40 pontos; "preto" = os tres canais ate 8.
+            Add-Type -AssemblyName System.Drawing
+            $img = [System.Drawing.Bitmap]::FromFile($destino)
+            try {
+                $acesos = 0; $total = 0
+                for ($iy = 0; $iy -lt 40; $iy++) {
+                    $y = [int]($img.Height * (0.2 + 0.6 * $iy / 39))
+                    for ($ix = 0; $ix -lt 40; $ix++) {
+                        $x = [int](($img.Width - 1) * $ix / 39)
+                        $c = $img.GetPixel($x, $y)
+                        $total++
+                        if ($c.R -gt 8 -or $c.G -gt 8 -or $c.B -gt 8) { $acesos++ }
+                    }
+                }
+            } finally { $img.Dispose() }
+            if ($acesos -gt 0) { throw "$acesos de $total pontos do centro da captura tem conteudo: o FLAG_SECURE nao valeu ($destino)" }
+            "$destino, $([math]::Round($b.Length / 1KB)) KB; centro preto ($total de $total pontos): FLAG_SECURE valendo"
         }
+    }
+
+    if ($Relay) {
+        Write-Host ''
+        Write-Host 'Relay de teste no ar. Faca o roteiro do teste com os dois celulares'
+        Write-Host '(documentacao/arquitetura/telas-de-conversa.md, secao "Teste com os dois celulares")'
+        Write-Host 'e aperte Enter aqui quando terminar. O relay desliga e os reverses saem.'
+        [void](Read-Host)
+        $resultados.Add('OK    teste na mao terminado (o resultado e o que voce viu nos celulares)')
     }
 
     $ok = $true
 } catch {
     $resultados.Add("FALHA $($_.Exception.Message)")
 } finally {
+    foreach ($sRev in $comReverse) {
+        $antes = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $adb -s $sRev reverse --remove "tcp:$portaRelay" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Write-Host "   aviso: nao consegui desfazer o adb reverse em $sRev" }
+        $ErrorActionPreference = $antes
+    }
+    if ($procRelay -and -not $procRelay.HasExited) {
+        Stop-Process -Id $procRelay.Id -Force
+        Write-Host 'relay de teste desligado'
+    }
+    foreach ($l in $logsRelay) { if (Test-Path -LiteralPath $l) { Remove-Item -LiteralPath $l -Force } }
     Set-Location -LiteralPath $Repo
     Write-Host ''
     foreach ($linha in $resultados) { Write-Host $linha }

@@ -2,17 +2,20 @@ import 'package:flutter/material.dart';
 
 import 'cofre.dart';
 import 'contatos.dart';
+import 'mensageiro.dart';
+import 'plantao.dart';
 import 'tema.dart';
-import 'telas/cofre_aberto.dart';
+import 'telas/central.dart';
 import 'telas/desbloqueio.dart';
 import 'telas/primeira_abertura.dart';
 
 /// App sem dependência direta da ponte nem da câmera: recebe a versão do núcleo
-/// pronta, a função que gera o código, o cofre, a agenda e a câmera, para os testes
-/// de tela rodarem no computador sem a biblioteca em Rust e sem o plugin.
+/// pronta, a função que gera o código, o cofre, a agenda, a câmera e o mensageiro,
+/// para os testes de tela rodarem no computador sem a biblioteca em Rust e sem o
+/// plugin.
 ///
 /// Sem cofre gravado: primeira abertura. Com cofre: desbloqueio. Depois de um dos
-/// dois: o cofre aberto, com o código.
+/// dois: a Central (modo 01), com o plantão ligado.
 class KryptosApp extends StatelessWidget {
   const KryptosApp({
     super.key,
@@ -21,6 +24,7 @@ class KryptosApp extends StatelessWidget {
     required this.cofre,
     required this.agenda,
     required this.abrirCamera,
+    required this.mensageiro,
   });
 
   final String versaoNucleo;
@@ -28,6 +32,7 @@ class KryptosApp extends StatelessWidget {
   final Cofre cofre;
   final Agenda agenda;
   final AbrirCamera abrirCamera;
+  final Mensageiro mensageiro;
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +46,7 @@ class KryptosApp extends StatelessWidget {
         cofre: cofre,
         agenda: agenda,
         abrirCamera: abrirCamera,
+        mensageiro: mensageiro,
       ),
     );
   }
@@ -53,6 +59,7 @@ class _Entrada extends StatefulWidget {
     required this.cofre,
     required this.agenda,
     required this.abrirCamera,
+    required this.mensageiro,
   });
 
   final String versaoNucleo;
@@ -60,6 +67,7 @@ class _Entrada extends StatefulWidget {
   final Cofre cofre;
   final Agenda agenda;
   final AbrirCamera abrirCamera;
+  final Mensageiro mensageiro;
 
   @override
   State<_Entrada> createState() => _EntradaState();
@@ -68,18 +76,34 @@ class _Entrada extends StatefulWidget {
 class _EntradaState extends State<_Entrada> {
   late final bool _temCofre = widget.cofre.existe();
   String? _codigo;
+  Plantao? _plantao;
 
-  void _aberto(String codigo) => setState(() => _codigo = codigo);
+  void _aberto(String codigo) {
+    final plantao = Plantao(mensageiro: widget.mensageiro);
+    setState(() {
+      _codigo = codigo;
+      _plantao = plantao;
+    });
+    plantao.iniciar();
+  }
+
+  @override
+  void dispose() {
+    _plantao?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final codigo = _codigo;
-    if (codigo != null) {
-      return CofreAberto(
+    final plantao = _plantao;
+    if (codigo != null && plantao != null) {
+      return Central(
         versaoNucleo: widget.versaoNucleo,
         codigo: codigo,
         agenda: widget.agenda,
         abrirCamera: widget.abrirCamera,
+        plantao: plantao,
       );
     }
     if (_temCofre) {

@@ -269,7 +269,7 @@ void main() {
     expect(cofre.criados, [
       [1, 3, 5, 7, 9, 0],
     ]);
-    expect(find.text('COFRE ABERTO'), findsOneWidget);
+    expect(find.text('MODO 01 · CENTRAL'), findsOneWidget);
     expect(find.text(codigoFalso), findsOneWidget);
     // A lista entregue ao cofre foi zerada pela tela depois do uso.
     expect(cofre.ultimaListaRecebida, isEmpty);
@@ -293,7 +293,7 @@ void main() {
     );
     cofre.segurar!.complete();
     await tester.pumpAndSettle();
-    expect(find.text('COFRE ABERTO'), findsOneWidget);
+    expect(find.text('MODO 01 · CENTRAL'), findsOneWidget);
   });
 
   testWidgets('falha ao gravar avisa e deixa tentar de novo', (tester) async {
@@ -314,7 +314,7 @@ void main() {
     await tocarBotao(tester, 'CONTINUAR');
     await tester.pumpAndSettle();
     expect(cofre.criados.length, 2);
-    expect(find.text('COFRE ABERTO'), findsOneWidget);
+    expect(find.text('MODO 01 · CENTRAL'), findsOneWidget);
   });
 
   testWidgets('na etapa de repetir o PIN, tudo cabe no motorola', (

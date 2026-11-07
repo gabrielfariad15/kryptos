@@ -1,8 +1,9 @@
 // Apoio comum dos testes de tela no computador, sem o núcleo em Rust e sem a câmera:
-// aparelhos medidos, fonte de verdade, cofre, agenda e câmera falsos e atalhos de
-// toque.
+// aparelhos medidos, fonte de verdade, cofre, agenda, câmera e mensageiro falsos e
+// atalhos de toque.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -12,7 +13,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kryptos/cofre.dart';
 import 'package:kryptos/contatos.dart';
+import 'package:kryptos/mensageiro.dart';
+import 'package:kryptos/plantao.dart';
+import 'package:kryptos/relay.dart';
 import 'package:kryptos/tela_inicial.dart';
+import 'package:kryptos/telas/central.dart';
+import 'package:kryptos/tema.dart';
 
 /// Tela de um aparelho: tamanho físico, densidade e barras do sistema (em pixels).
 class Aparelho {
@@ -194,6 +200,115 @@ class FabricaDeCameras {
   CameraFalsa get ultima => abertas.last;
 }
 
+/// Uma mensagem na caixa falsa: o que a tela vê e o texto guardado.
+class GuardadaFalsa {
+  GuardadaFalsa(this.gaveta, this.remetente, this.texto);
+
+  final int gaveta;
+  final String remetente;
+  final List<int> texto;
+  bool lida = false;
+}
+
+/// Caixa e relay em memória. A queima é imediata (o teste não espera um minuto): as
+/// lidas queimam em [queimarVencidas] quando [vencidas] for verdadeiro.
+class MensageiroFalso implements Mensageiro {
+  MensageiroFalso({this.temRelay = true});
+
+  @override
+  final bool temRelay;
+
+  final caixa = <GuardadaFalsa>[];
+  final enviadas = <(String, List<int>)>[];
+  final chamadas = <String>[];
+
+  /// Cartas que o próximo [buscar] traz (cada uma vira uma gaveta).
+  final noRelay = <(String, String)>[];
+  int naoAbertasNoNucleo = 0;
+  bool vencidas = false;
+  FalhaDoRelay? falhaNaBusca;
+  FalhaDoRelay? falhaNoEnvio;
+  FalhaDoCofre? falhaNaLeitura;
+
+  /// Textos entregues pela leitura, para conferir que a tela zerou.
+  final entregues = <Uint8List>[];
+
+  /// Se definido, a leitura só termina quando ele completar.
+  Completer<void>? segurarLeitura;
+  int _proxima = 0;
+
+  void guardar(String remetente, String texto) =>
+      caixa.add(GuardadaFalsa(_proxima++, remetente, utf8.encode(texto)));
+
+  @override
+  Future<void> preparar() async {
+    chamadas.add('preparar');
+    caixa.removeWhere((m) => m.lida);
+  }
+
+  @override
+  Future<void> publicarChaves() async => chamadas.add('publicar');
+
+  @override
+  Future<Recebidas> buscar() async {
+    chamadas.add('buscar');
+    final f = falhaNaBusca;
+    if (f != null) throw f;
+    final n = noRelay.length;
+    for (final (remetente, texto) in noRelay) {
+      guardar(remetente, texto);
+    }
+    noRelay.clear();
+    return Recebidas(seladas: n, naoAbriram: 0, caixaCheia: false);
+  }
+
+  @override
+  Future<List<Selada>> listar() async => [
+    for (final m in caixa)
+      Selada(gaveta: m.gaveta, lida: m.lida, remetente: m.remetente),
+  ];
+
+  @override
+  Future<int> naoAbertas() async => naoAbertasNoNucleo;
+
+  @override
+  Future<Aberta> ler(int gaveta) async {
+    chamadas.add('ler');
+    await segurarLeitura?.future;
+    final f = falhaNaLeitura;
+    if (f != null) throw f;
+    final m = caixa.firstWhere((m) => m.gaveta == gaveta);
+    m.lida = true;
+    final texto = Uint8List.fromList(m.texto);
+    entregues.add(texto);
+    return Aberta(remetente: m.remetente, texto: texto);
+  }
+
+  @override
+  Future<int> queimarVencidas() async {
+    if (!vencidas) return 0;
+    final antes = caixa.length;
+    caixa.removeWhere((m) => m.lida);
+    return antes - caixa.length;
+  }
+
+  @override
+  Future<int> queimarLidas() async {
+    chamadas.add('queimarLidas');
+    final antes = caixa.length;
+    caixa.removeWhere((m) => m.lida);
+    return antes - caixa.length;
+  }
+
+  @override
+  Future<void> enviar(String codigo, Uint8List texto) async {
+    chamadas.add('enviar');
+    final f = falhaNoEnvio;
+    if (f != null) throw f;
+    enviadas.add((codigo, List.of(texto)));
+  }
+}
+
 Future<void> abrir(
   WidgetTester tester, {
   Aparelho aparelho = motorolaEdge40Neo,
@@ -201,6 +316,7 @@ Future<void> abrir(
   Cofre? cofre,
   Agenda? agenda,
   AbrirCamera? abrirCamera,
+  Mensageiro? mensageiro,
 }) async {
   tester.view.physicalSize = Size(aparelho.largura, aparelho.altura);
   tester.view.devicePixelRatio = aparelho.densidade;
@@ -220,6 +336,7 @@ Future<void> abrir(
       cofre: cofre ?? CofreFalso(),
       agenda: agenda ?? AgendaFalsa(),
       abrirCamera: abrirCamera ?? FabricaDeCameras().call,
+      mensageiro: mensageiro ?? MensageiroFalso(),
     ),
   );
 }
@@ -301,4 +418,112 @@ void conferirQueCabe(WidgetTester tester, String botao) {
   final acao = tester.getRect(find.byKey(Key('botao-$botao')));
   final rodape = tester.getRect(find.byKey(const Key('rodape')));
   expect(acao.bottom, lessThanOrEqualTo(rodape.top));
+}
+
+/// Relógio que só anda quando o teste manda (o DateTime.now do teste não acompanha o
+/// tempo falso dos timers).
+class RelogioFalso {
+  DateTime agora = DateTime(2026, 11, 7, 20, 14);
+
+  DateTime call() => agora;
+}
+
+/// Anda [tempo] de segundo em segundo, no relógio e nos timers.
+Future<void> passar(
+  WidgetTester tester,
+  RelogioFalso relogio,
+  Duration tempo,
+) async {
+  var falta = tempo;
+  while (falta > Duration.zero) {
+    final passo = falta < const Duration(seconds: 1)
+        ? falta
+        : const Duration(seconds: 1);
+    relogio.agora = relogio.agora.add(passo);
+    await tester.pump(passo);
+    falta -= passo;
+  }
+  // Termina o que a fila do plantão deixou em microtarefas.
+  for (var i = 0; i < 5; i++) {
+    await tester.pump();
+  }
+}
+
+/// A Central montada direto, com plantão ligado num mensageiro falso.
+Future<Plantao> abrirCentral(
+  WidgetTester tester, {
+  required MensageiroFalso mensageiro,
+  required RelogioFalso relogio,
+  AgendaFalsa? agenda,
+  Aparelho aparelho = motorolaEdge40Neo,
+  String codigo = codigoFalso,
+}) async {
+  tester.view.physicalSize = Size(aparelho.largura, aparelho.altura);
+  tester.view.devicePixelRatio = aparelho.densidade;
+  tester.view.padding = FakeViewPadding(
+    top: aparelho.barraTopo,
+    bottom: aparelho.barraBase,
+  );
+  tester.view.viewPadding = FakeViewPadding(
+    top: aparelho.barraTopo,
+    bottom: aparelho.barraBase,
+  );
+  addTearDown(tester.view.reset);
+  // Cada teste começa com o app na frente, mesmo que o anterior tenha terminado no
+  // fundo (ainda não há quem escute o ciclo de vida: o salto direto não quebra nada).
+  tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  final plantao = Plantao(mensageiro: mensageiro, relogio: relogio.call);
+  await tester.pumpWidget(
+    DonoDoPlantao(
+      plantao: plantao,
+      child: MaterialApp(
+        theme: temaKryptos(),
+        home: Central(
+          versaoNucleo: '9.8.7',
+          codigo: codigo,
+          agenda: agenda ?? AgendaFalsa(),
+          abrirCamera: FabricaDeCameras().call,
+          plantao: plantao,
+        ),
+      ),
+    ),
+  );
+  await plantao.iniciar();
+  for (var i = 0; i < 5; i++) {
+    await tester.pump();
+  }
+  return plantao;
+}
+
+/// Agenda falsa já com contatos (conferidos por QR, salvo os de [naoConferidos]).
+AgendaFalsa agendaCom(
+  List<String> codigos, {
+  List<String> naoConferidos = const [],
+}) => AgendaFalsa()
+  ..lista.addAll([
+    for (final c in codigos)
+      ContatoNaAgenda(codigo: c, conferidoPorQr: !naoConferidos.contains(c)),
+  ]);
+
+/// Descarta o plantão quando sai da árvore, como a tela de entrada do app faz: os
+/// timers param antes de o teste conferir que nenhum ficou pendente.
+class DonoDoPlantao extends StatefulWidget {
+  const DonoDoPlantao({super.key, required this.plantao, required this.child});
+
+  final Plantao plantao;
+  final Widget child;
+
+  @override
+  State<DonoDoPlantao> createState() => _DonoDoPlantaoState();
+}
+
+class _DonoDoPlantaoState extends State<DonoDoPlantao> {
+  @override
+  void dispose() {
+    widget.plantao.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

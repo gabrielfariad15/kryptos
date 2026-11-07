@@ -43,7 +43,7 @@ void main() {
     await digitar(tester, '135790');
     await tocarBotao(tester, 'ABRIR');
     await tester.pumpAndSettle();
-    expect(find.text('COFRE ABERTO'), findsOneWidget);
+    expect(find.text('MODO 01 · CENTRAL'), findsOneWidget);
     expect(find.text(codigoFalso), findsOneWidget);
     expect(cofre.ultimaListaRecebida, isEmpty, reason: 'PIN não foi zerado');
   });
@@ -64,7 +64,7 @@ void main() {
     await digitar(tester, '135790');
     await tocarBotao(tester, 'ABRIR');
     await tester.pumpAndSettle();
-    expect(find.text('COFRE ABERTO'), findsOneWidget);
+    expect(find.text('MODO 01 · CENTRAL'), findsOneWidget);
   });
 
   testWidgets('dígitos do PIN não aparecem escritos na tela', (tester) async {
@@ -91,7 +91,7 @@ void main() {
     );
     cofre.segurar!.complete();
     await tester.pumpAndSettle();
-    expect(find.text('COFRE ABERTO'), findsOneWidget);
+    expect(find.text('MODO 01 · CENTRAL'), findsOneWidget);
   });
 
   testWidgets('chave do aparelho apagada: aviso próprio, sem quebrar', (

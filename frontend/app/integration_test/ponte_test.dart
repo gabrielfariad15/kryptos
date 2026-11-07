@@ -9,8 +9,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:kryptos/agenda_do_aparelho.dart';
+import 'package:kryptos/caixa_do_aparelho.dart';
 import 'package:kryptos/camera_do_aparelho.dart';
 import 'package:kryptos/cofre_do_aparelho.dart';
+import 'package:kryptos/mensageiro_do_aparelho.dart';
 import 'package:kryptos/src/rust/api/nucleo.dart';
 import 'package:kryptos/src/rust/frb_generated.dart';
 import 'package:kryptos/tela_inicial.dart';
@@ -21,6 +23,7 @@ final formatoCodigo = RegExp(r'^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$');
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   late CofreDoAparelho cofreVazio;
+  late MensageiroDoAparelho mensageiro;
 
   setUpAll(() async {
     await RustLib.init();
@@ -34,6 +37,14 @@ void main() {
       pasta: pasta,
       chave: chave,
       alias: 'kryptos-teste-ponte',
+    );
+    // Gavetas com prefixo próprio e sem relay: o teste não chega à Central, mas se
+    // chegasse não tocaria nas chaves das gavetas do app.
+    mensageiro = MensageiroDoAparelho(
+      caixa: CaixaDoAparelho(
+        chave: chave,
+        prefixo: 'kryptos-teste-ponte-gaveta-',
+      ),
     );
   });
 
@@ -52,6 +63,7 @@ void main() {
         cofre: cofreVazio,
         agenda: const AgendaDoAparelho(),
         abrirCamera: CameraDoAparelho.new,
+        mensageiro: mensageiro,
       ),
     );
     expect(find.text('NÚCLEO v0.1.0'), findsOneWidget);
@@ -67,6 +79,7 @@ void main() {
         cofre: cofreVazio,
         agenda: const AgendaDoAparelho(),
         abrirCamera: CameraDoAparelho.new,
+        mensageiro: mensageiro,
       ),
     );
     expect(find.text('····-····'), findsOneWidget);

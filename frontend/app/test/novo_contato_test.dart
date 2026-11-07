@@ -7,7 +7,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kryptos/contatos.dart';
-import 'package:kryptos/telas/cofre_aberto.dart';
+import 'package:kryptos/plantao.dart';
+import 'package:kryptos/telas/central.dart';
 import 'package:kryptos/tema.dart';
 
 import 'apoio.dart';
@@ -32,14 +33,17 @@ Future<void> abrirCofre(
     bottom: aparelho.barraBase,
   );
   addTearDown(tester.view.reset);
+  final plantao = Plantao(mensageiro: MensageiroFalso());
+  addTearDown(plantao.dispose);
   await tester.pumpWidget(
     MaterialApp(
       theme: temaKryptos(),
-      home: CofreAberto(
+      home: Central(
         versaoNucleo: '9.8.7',
         codigo: codigoProprio,
         agenda: agenda,
         abrirCamera: cameras.call,
+        plantao: plantao,
       ),
     ),
   );
@@ -87,7 +91,7 @@ Future<void> _fluxoComRecusaELeitura(WidgetTester tester) async {
 void main() {
   setUpAll(carregarFontes);
 
-  testWidgets('cofre aberto sem contatos: lista vazia e NOVO CONTATO ligado', (
+  testWidgets('central sem contatos: lista vazia e NOVO CONTATO ligado', (
     tester,
   ) async {
     await abrirCofre(
@@ -95,7 +99,7 @@ void main() {
       agenda: AgendaFalsa(),
       cameras: FabricaDeCameras(),
     );
-    expect(find.text('02 · CONTATOS (0)'), findsOneWidget);
+    expect(find.text('CANAIS (0)'), findsOneWidget);
     expect(acaoDoBotao(tester, 'NOVO CONTATO'), isNotNull);
   });
 
@@ -173,9 +177,9 @@ void main() {
 
       await tester.tap(find.byKey(const Key('voltar')));
       await tester.pumpAndSettle();
-      expect(find.text('02 · CONTATOS (1)'), findsOneWidget);
-      expect(find.byKey(const Key('contato-$codigoOutro')), findsOneWidget);
-      expect(find.text('CHAVE CONFERIDA · QR'), findsOneWidget);
+      expect(find.text('CANAIS (1)'), findsOneWidget);
+      expect(find.byKey(const Key('canal-$codigoOutro')), findsOneWidget);
+      expect(find.text('CONVERSA · CHAVE CONFERIDA'), findsOneWidget);
     },
   );
 
@@ -283,7 +287,7 @@ void main() {
     await tester.tap(find.byKey(const Key('voltar')));
     await tester.pumpAndSettle();
     expect(cameras.ultima.fechamentos, 1);
-    expect(find.text('COFRE ABERTO'), findsOneWidget);
+    expect(find.text('MODO 01 · CENTRAL'), findsOneWidget);
   });
 
   testWidgets(

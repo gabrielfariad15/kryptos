@@ -14,31 +14,16 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge.dart';
 
 import 'caixa_do_aparelho.dart';
 import 'cofre.dart';
+import 'mensageiro.dart';
 import 'relay.dart';
 import 'src/rust/api/nucleo.dart' as nucleo;
+
+export 'mensageiro.dart' show Recebidas;
 
 /// Quantas chaves avulsas manter no relay. Estimo: 50 conversas novas antes de o app
 /// abrir de novo; abaixo de 20, repõe.
 const chavesNoRelay = 50;
 const minimoDeChavesNoRelay = 20;
-
-/// O que uma busca no relay trouxe.
-class Recebidas {
-  const Recebidas({
-    required this.seladas,
-    required this.naoAbriram,
-    required this.caixaCheia,
-  });
-
-  /// Cartas seladas na caixa agora.
-  final int seladas;
-
-  /// Cartas que não abriram (conversa encerrada, estranho, adulterada).
-  final int naoAbriram;
-
-  /// A caixa encheu: ficaram cartas no relay.
-  final bool caixaCheia;
-}
 
 class Correio {
   Correio({required this.relay, required this.caixa});

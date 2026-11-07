@@ -11,8 +11,8 @@
 #
 # -Aparelho tambem roda os testes no celular ligado no cabo (instala o app de teste,
 # confere que o nucleo em Rust responde de dentro do Android, prova o cofre da
-# identidade com o Keystore de verdade, o QR do contato pela ponte, a caixa selada e
-# o caminho pelo relay). Para o relay, sobe o relay de teste nesta maquina (so em
+# identidade com o Keystore de verdade, o QR do contato pela ponte, a caixa selada,
+# o caminho pelo relay, o mensageiro das telas e a tela segura). Para o relay, sobe o relay de teste nesta maquina (so em
 # 127.0.0.1, malote na memoria) e liga a porta ao celular com o adb reverse; no fim
 # desliga o relay e desfaz o reverse.
 # Sem -Todos nem -Serial, exige um unico celular no cabo. -Todos roda em cada um, um
@@ -172,7 +172,7 @@ try {
         }
         foreach ($sAtual in $alvos) {
             $modelo = Rodar $adb @('-s', $sAtual, 'shell', 'getprop', 'ro.product.model')
-            Passo "teste no celular: ponte, cofre, QR, caixa e relay ($modelo)" {
+            Passo "teste no celular: ponte, cofre, QR, caixa, relay, mensageiro e tela ($modelo)" {
                 Write-Host "   $modelo [$sAtual]: compila o Rust para Android e instala o app de teste (a primeira vez demora)"
                 Rodar $adb @('-s', $sAtual, 'reverse', "tcp:$portaRelay", "tcp:$portaRelay") | Out-Null
                 try {
@@ -185,13 +185,16 @@ try {
                     $ErrorActionPreference = $antes
                 }
                 if ($t -notmatch 'All tests passed') { throw "teste no aparelho sem 'All tests passed'" }
-                # cofre_test, qr_test, caixa_test e relay_test imprimem tempos, onde ficou a
-                # chave e a varredura (sem segredo).
+                # cofre_test, qr_test, caixa_test, relay_test, mensageiro_test e tela_test
+                # imprimem tempos, onde ficou a chave, a varredura e a tela segura (sem
+                # segredo).
                 $medidas = @([regex]::Matches($t, 'MEDIDA ([^\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim() })
                 if ($medidas.Count -lt 2) { throw 'o teste do cofre passou sem imprimir as linhas MEDIDA' }
                 if (-not ($medidas | Where-Object { $_ -like 'qr no aparelho*' })) { throw 'o teste do QR passou sem imprimir a linha MEDIDA' }
                 if (-not ($medidas | Where-Object { $_ -like 'caixa:*' })) { throw 'o teste da caixa passou sem imprimir a linha MEDIDA' }
                 if (-not ($medidas | Where-Object { $_ -like 'relay:*' })) { throw 'o teste do relay nao rodou (pulado?) ou nao imprimiu a linha MEDIDA' }
+                if (-not ($medidas | Where-Object { $_ -like 'tela:*' })) { throw 'o teste da tela segura passou sem imprimir a linha MEDIDA' }
+                if (-not ($medidas | Where-Object { $_ -like 'mensageiro:*' })) { throw 'o teste do mensageiro nao rodou (pulado?) ou nao imprimiu a linha MEDIDA' }
                 'nucleo 0.1.0 dentro do Android; ' + ($medidas -join '; ')
             }
         }
