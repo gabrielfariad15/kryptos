@@ -41,6 +41,7 @@ Tarefa pequena não precisa de cerimônia. Uma pergunta direta recebe uma respos
 3. Nunca `$s.Replace` de bloco longo no PowerShell.
 4. Uma variável por vez. Duas mudanças juntas não dizem qual delas resolveu.
 5. Codificação: UTF-8 sem BOM. Exceção: `.ps1` com acento vai com BOM, senão o Windows PowerShell 5.1 corrompe os acentos.
+6. Fim de linha: fixado pelo `.gitattributes`, igual em qualquer máquina. No repositório tudo fica com LF; na pasta, CRLF só em `.ps1`, `.bat` e `.cmd`. A suíte confere. Pacote do Claude já vem no fim de linha da pasta.
 
 
 ## 4. Comandos
@@ -135,9 +136,12 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 | `ferramentas/suite.ps1` | Suíte antes de commit: fmt, clippy, testes Rust, análise e testes do Flutter; com `-Aparelho`, o teste da ponte no celular |
 | `ferramentas/instalar-no-celular.ps1` | Compila, instala, abre o app, confere o logcat e salva a captura da tela em Downloads |
 | `ferramentas/aplicar-pacote.ps1` | Aplica um pacote de arquivos inteiros entregue pelo Claude: confere o sha de antes e de depois e lê de volta |
+| `ferramentas/conferir-fim-de-linha.ps1` | Confere pelo `git ls-files --eol` se todo arquivo rastreado segue o `.gitattributes`; a suíte chama |
+| `ferramentas/normalizar-fim-de-linha.ps1` | Aplica o `.gitattributes` ao que já existe: `git add --renormalize` e troca só o fim de linha na pasta |
 
 
 ## Histórico
 
 - 06/11/2026: versão 1, criada do zero para o Kryptos a partir das regras do Lastro e das lições do dia (um bloco que seguia depois do erro; um arquivo da máquina indo para o git). Ganhou as regras de segurança próprias do projeto (seção 8) e a abertura de conversa (seção 10).
 - 06/11/2026: tabela de ferramentas com os cinco scripts da fase 1 (diagnóstico, instalação, suíte, instalação no celular, aplicação de pacote).
+- 06/11/2026: fim de linha fixado pelo `.gitattributes` (regra 3.6), conferido pela suíte. Motivo: o `core.autocrlf` do Windows deixava o mesmo arquivo com sha diferente entre máquinas, e `.cmd` com LF pode falhar no cmd.exe.

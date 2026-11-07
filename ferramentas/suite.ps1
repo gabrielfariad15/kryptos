@@ -1,5 +1,6 @@
 # ferramentas/suite.ps1
 # Suite do Kryptos: tudo o que precisa estar verde antes de um commit (regra 5.1).
+# Ordem: fim de linha, Rust (fmt, clippy, testes), Flutter (analise, testes).
 # Para no primeiro passo que falhar.
 #
 # Uso (uma linha):
@@ -67,6 +68,13 @@ try {
     Set-Location -LiteralPath $Repo
     $flutter = Achar (Join-Path $Amb.flutter 'bin') @('flutter.bat', 'flutter')
     $app = Join-Path (Join-Path $Repo 'frontend') 'app'
+
+    # ---------- Fim de linha (regra do .gitattributes) ----------
+    Passo 'fim de linha' {
+        $ps = (Get-Process -Id $PID).Path
+        $t = Rodar $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'conferir-fim-de-linha.ps1'), '-Raiz', $Repo)
+        if ($t -match 'OK\s+fim de linha: (\d+) arquivos') { "$($Matches[1]) arquivos de texto" }
+    }
 
     # ---------- Rust (nucleo, relay e ponte) ----------
     Passo 'cargo fmt' { Rodar 'cargo' @('fmt', '--all', '--', '--check') | Out-Null; 'formatacao em dia' }

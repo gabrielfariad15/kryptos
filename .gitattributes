@@ -1,0 +1,21 @@
+# Fim de linha fixo, igual em qualquer maquina, sem depender do core.autocrlf de cada uma.
+# No repositorio todo texto fica com LF; o eol abaixo decide como ele aparece na pasta.
+# A suite confere (ferramentas/conferir-fim-de-linha.ps1).
+* text=auto eol=lf
+
+# Scripts do Windows: CRLF na pasta (o cmd.exe falha em goto/rotulos com LF).
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Scripts de shell: LF (com CRLF nao rodam no Linux nem no macOS).
+*.sh text eol=lf
+
+# Binarios: nunca converter.
+*.ttf binary
+*.otf binary
+*.png binary
+*.jpg binary
+*.jar binary
+*.so binary
+*.zip binary
