@@ -7,6 +7,8 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `erro`
+
 /// Versão do núcleo compilado dentro do app.
 String versaoNucleo() => RustLib.instance.api.crateApiNucleoVersaoNucleo();
 
@@ -14,3 +16,98 @@ String versaoNucleo() => RustLib.instance.api.crateApiNucleoVersaoNucleo();
 /// contato no formato XXXX-XXXX. A chave fica no núcleo; só o código atravessa.
 String gerarCodigoContato() =>
     RustLib.instance.api.crateApiNucleoGerarCodigoContato();
+
+/// Código da identidade que está na memória, ou nada.
+String? codigoAtual() => RustLib.instance.api.crateApiNucleoCodigoAtual();
+
+/// Tira a identidade da memória (como fechar o app).
+void esquecerIdentidade() =>
+    RustLib.instance.api.crateApiNucleoEsquecerIdentidade();
+
+bool cofreExiste({required String pasta}) =>
+    RustLib.instance.api.crateApiNucleoCofreExiste(pasta: pasta);
+
+/// Segundos que a próxima tentativa de PIN vai esperar antes de conferir.
+int cofreEsperaSegundos({required String pasta}) =>
+    RustLib.instance.api.crateApiNucleoCofreEsperaSegundos(pasta: pasta);
+
+/// Criar, etapa 1. O PIN chega como dígitos ASCII.
+Future<PinPreparado> cofrePrepararPinNovo({required List<int> pin}) =>
+    RustLib.instance.api.crateApiNucleoCofrePrepararPinNovo(pin: pin);
+
+/// Criar, etapa 2: grava a identidade da memória com a chave que voltou do Keystore.
+Future<void> cofreCriar({
+  required String pasta,
+  required List<int> sal,
+  required List<int> chave,
+}) => RustLib.instance.api.crateApiNucleoCofreCriar(
+  pasta: pasta,
+  sal: sal,
+  chave: chave,
+);
+
+/// Abrir, etapa 1: registra a tentativa, cumpre a espera e estica o PIN.
+Future<Uint8List> cofrePrepararAbertura({
+  required String pasta,
+  required List<int> pin,
+}) => RustLib.instance.api.crateApiNucleoCofrePrepararAbertura(
+  pasta: pasta,
+  pin: pin,
+);
+
+/// Abrir, etapa 2: abre com a chave do Keystore e devolve o código de contato.
+Future<String> cofreAbrir({required String pasta, required List<int> chave}) =>
+    RustLib.instance.api.crateApiNucleoCofreAbrir(pasta: pasta, chave: chave);
+
+/// Apaga o arquivo do cofre e o contador (a chave do Keystore o Kotlin apaga).
+Future<void> cofreApagar({required String pasta}) =>
+    RustLib.instance.api.crateApiNucleoCofreApagar(pasta: pasta);
+
+/// Procura as chaves secretas da identidade aberta em todos os arquivos da pasta.
+Future<Varredura> procurarSegredos({required String pasta}) =>
+    RustLib.instance.api.crateApiNucleoProcurarSegredos(pasta: pasta);
+
+/// Sal novo e PIN esticado (Argon2id), para o HMAC do Keystore.
+class PinPreparado {
+  final Uint8List sal;
+  final Uint8List esticado;
+
+  const PinPreparado({required this.sal, required this.esticado});
+
+  @override
+  int get hashCode => sal.hashCode ^ esticado.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PinPreparado &&
+          runtimeType == other.runtimeType &&
+          sal == other.sal &&
+          esticado == other.esticado;
+}
+
+/// Contagens da busca pelas chaves secretas em disco. Nunca o conteúdo.
+class Varredura {
+  final int arquivos;
+  final int ocorrencias;
+  final int ilegiveis;
+
+  const Varredura({
+    required this.arquivos,
+    required this.ocorrencias,
+    required this.ilegiveis,
+  });
+
+  @override
+  int get hashCode =>
+      arquivos.hashCode ^ ocorrencias.hashCode ^ ilegiveis.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Varredura &&
+          runtimeType == other.runtimeType &&
+          arquivos == other.arquivos &&
+          ocorrencias == other.ocorrencias &&
+          ilegiveis == other.ilegiveis;
+}

@@ -1,14 +1,17 @@
 //! Núcleo do Kryptos: o motor que roda no aparelho.
 //!
-//! - `identidade`: a conta Olm (vodozemac) do aparelho, só na memória.
+//! - `identidade`: a conta Olm (vodozemac) do aparelho.
 //! - `codigo`: o código de contato que sai da chave pública.
-//! - `aparelho`: guarda a identidade desta execução; a chave não atravessa a ponte.
+//! - `cofre`: a identidade gravada cifrada (PIN + Keystore).
+//! - `aparelho`: guarda a identidade desta execução e conduz o cofre; a chave não
+//!   atravessa a ponte.
 //!
-//! Protocolo, queima e gravação cifrada entram nas próximas etapas, cada uma com
-//! teste de vetor conhecido e teste de adulteração (regra 8.4).
+//! Protocolo e queima entram nas próximas etapas, cada uma com teste de vetor
+//! conhecido e teste de adulteração (regra 8.4).
 
 pub mod aparelho;
 pub mod codigo;
+pub mod cofre;
 pub mod identidade;
 
 pub use codigo::{CodigoContato, ErroCodigo};

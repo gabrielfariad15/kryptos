@@ -7,8 +7,9 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\suite.ps1
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\suite.ps1 -Aparelho
 #
-# -Aparelho tambem roda o teste da ponte no celular ligado no cabo (instala o app
-# de teste e confere que o nucleo em Rust responde de dentro do Android).
+# -Aparelho tambem roda os testes no celular ligado no cabo (instala o app de teste,
+# confere que o nucleo em Rust responde de dentro do Android e prova o cofre da
+# identidade com o Keystore de verdade).
 
 [CmdletBinding()]
 param(
@@ -106,11 +107,14 @@ try {
             ForEach-Object { $p = $_.Trim() -split '\s+'; if ($p.Count -ge 2 -and $p[1] -eq 'device') { $p[0] } })
         if ($serial.Count -ne 1) { throw "preciso de exatamente 1 celular autorizado no adb; achei $($serial.Count)" }
         $modelo = Rodar $adb @('-s', $serial[0], 'shell', 'getprop', 'ro.product.model')
-        Passo "teste da ponte no celular ($modelo)" {
+        Passo "teste no celular: ponte e cofre ($modelo)" {
             Write-Host '   compila o Rust para Android e instala o app de teste (a primeira vez demora)'
             $t = Rodar $flutter @('test', 'integration_test', '-d', $serial[0])
             if ($t -notmatch 'All tests passed') { throw "teste no aparelho sem 'All tests passed'" }
-            'nucleo respondeu 0.1.0 dentro do Android'
+            # O cofre_test.dart imprime tempos, onde ficou a chave e a varredura (sem segredo).
+            $medidas = @([regex]::Matches($t, 'MEDIDA ([^\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim() })
+            if ($medidas.Count -lt 2) { throw 'o teste do cofre passou sem imprimir as linhas MEDIDA' }
+            'nucleo 0.1.0 dentro do Android; ' + ($medidas -join '; ')
         }
     }
 

@@ -1,7 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Sem backup: o cofre da identidade fica em noBackupFilesDir e nada do app vai
+         para backup em nuvem ou adb (cofre-da-identidade.md). -->
     <application
         android:label="Kryptos"
         android:name="${applicationName}"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

@@ -41,4 +41,4 @@ Medido em 07/11/2026 com 3.000 códigos aleatórios:
 
 - Com 35 bits, dá para fabricar uma chave que caia no código de outra pessoa. Por isso o servidor não pode aceitar dois cadastros com o mesmo código, e o código nunca substitui a conferência da chave.
 - Duas pessoas honestas podem cair no mesmo código. Pela conta do aniversário: 0,15% de chance de haver alguma colisão com 10 mil usuários e 50% perto de 218 mil. Na primeira abertura, quando o servidor recusar o código por já estar em uso, o aparelho gera outra identidade.
-- Nesta etapa a identidade fica só na memória: fechar o app perde a chave e o código muda. Gravar cifrado com o PIN e o Keystore é o próximo assunto.
+- Desde 07/11/2026 a identidade fica gravada cifrada no aparelho (PIN + Keystore) e o código não muda entre aberturas. Ver `cofre-da-identidade.md`.

@@ -133,10 +133,11 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 | `ferramentas/modelo.ps1` | Base de script novo: para no erro, limpa no final, imprime só o resultado |
 | `ferramentas/diagnostico-ambiente.ps1` | Confere, sem alterar nada, se a máquina tem Rust, Flutter, SDK/NDK do Android, gerador da ponte e o celular no cabo |
 | `ferramentas/instalar-ferramentas.ps1` | Instala o que o diagnóstico apontou, com versões fixas, e grava os caminhos no `ambiente.json` |
-| `ferramentas/suite.ps1` | Suíte antes de commit: fmt, clippy, testes Rust, análise e testes do Flutter; com `-Aparelho`, o teste da ponte no celular |
-| `ferramentas/instalar-no-celular.ps1` | Compila, instala, abre o app, confere o logcat e salva a captura da tela em Downloads |
+| `ferramentas/suite.ps1` | Suíte antes de commit: fmt, clippy, testes Rust, análise e testes do Flutter; com `-Aparelho`, os testes da ponte e do cofre no celular, com as medidas |
+| `ferramentas/instalar-no-celular.ps1` | Compila uma vez, instala, abre o app, confere o logcat, informa tamanho e densidade da tela e salva a captura em Downloads; com mais de um celular, `-Todos` ou `-Serial` |
 | `ferramentas/aplicar-pacote.ps1` | Aplica um pacote de arquivos inteiros entregue pelo Claude: confere o sha de antes e de depois e lê de volta |
 | `ferramentas/conferir-fim-de-linha.ps1` | Confere pelo `git ls-files --eol` se todo arquivo rastreado segue o `.gitattributes`; a suíte chama |
+| `ferramentas/oraculos/cofre.py` | Recalcula, sem o código Rust, os vetores conhecidos do cofre da identidade (só quando o formato mudar) |
 | `ferramentas/normalizar-fim-de-linha.ps1` | Aplica o `.gitattributes` ao que já existe: `git add --renormalize` e troca só o fim de linha na pasta |
 
 
@@ -145,3 +146,4 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 - 06/11/2026: versão 1, criada do zero para o Kryptos a partir das regras do Lastro e das lições do dia (um bloco que seguia depois do erro; um arquivo da máquina indo para o git). Ganhou as regras de segurança próprias do projeto (seção 8) e a abertura de conversa (seção 10).
 - 06/11/2026: tabela de ferramentas com os cinco scripts da fase 1 (diagnóstico, instalação, suíte, instalação no celular, aplicação de pacote).
 - 06/11/2026: fim de linha fixado pelo `.gitattributes` (regra 3.6), conferido pela suíte. Motivo: o `core.autocrlf` do Windows deixava o mesmo arquivo com sha diferente entre máquinas, e `.cmd` com LF pode falhar no cmd.exe.
+- 07/11/2026: tabela de ferramentas com o oráculo do cofre; a suíte com `-Aparelho` passa a provar o cofre da identidade no celular.

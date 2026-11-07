@@ -2,33 +2,28 @@
 //
 // GERAR CÓDIGO pede ao núcleo a identidade (vodozemac) e mostra o código de
 // contato que sai da chave pública. A chave fica no núcleo; aqui só chega o código,
-// que não vai para log (regra 8.2). Nada é gravado: fechar o app perde a identidade.
-// CONTINUAR segue desligado até o PIN real (derivação de chave + Keystore), num
-// assunto próprio. O teclado do PIN funciona para conferir o visual; os dígitos
-// ficam só na memória deste widget e não vão para log, disco nem para a tela.
+// que não vai para log (regra 8.2).
+//
+// CONTINUAR liga com o código gerado e os seis dígitos. O primeiro toque pede o PIN
+// de novo; o segundo, com os dois iguais, grava a identidade no cofre (Argon2id no
+// núcleo + chave do Keystore) e passa para a tela do cofre aberto. Os dígitos ficam
+// só na memória deste widget, zerados ao sair, e não vão para log, disco nem tela.
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
+import '../cofre.dart';
 import '../tema.dart';
+import 'componentes.dart';
 
-const tamanhoPin = 6;
-
-/// Barras do sistema: fundo do app aparecendo atrás, ícones claros, sem véu.
-const estiloBarras = SystemUiOverlayStyle(
-  statusBarColor: Colors.transparent,
-  statusBarIconBrightness: Brightness.light,
-  statusBarBrightness: Brightness.dark,
-  systemNavigationBarColor: Colors.transparent,
-  systemNavigationBarIconBrightness: Brightness.light,
-  systemNavigationBarContrastEnforced: false,
-);
+enum _Etapa { pin, confirmacao, gravando }
 
 class PrimeiraAbertura extends StatefulWidget {
   const PrimeiraAbertura({
     super.key,
     required this.versaoNucleo,
     required this.gerarCodigo,
+    required this.cofre,
+    required this.aoConcluir,
   });
 
   /// Versão informada pelo núcleo em Rust, pela ponte.
@@ -38,14 +33,22 @@ class PrimeiraAbertura extends StatefulWidget {
   /// os testes de tela rodarem no computador sem a biblioteca em Rust.
   final String Function() gerarCodigo;
 
+  final Cofre cofre;
+
+  /// Chamado com o código depois que a identidade foi gravada.
+  final void Function(String codigo) aoConcluir;
+
   @override
   State<PrimeiraAbertura> createState() => _PrimeiraAberturaState();
 }
 
 class _PrimeiraAberturaState extends State<PrimeiraAbertura> {
   final List<int> _pin = [];
+  final List<int> _primeiro = [];
+  _Etapa _etapa = _Etapa.pin;
   String? _codigo;
   bool _falhou = false;
+  String? _aviso;
 
   void _gerar() {
     if (_codigo != null) return;
@@ -66,7 +69,10 @@ class _PrimeiraAberturaState extends State<PrimeiraAbertura> {
 
   void _digitar(int d) {
     if (_pin.length >= tamanhoPin) return;
-    setState(() => _pin.add(d));
+    setState(() {
+      _pin.add(d);
+      _aviso = null;
+    });
   }
 
   void _apagar() {
@@ -74,316 +80,143 @@ class _PrimeiraAberturaState extends State<PrimeiraAbertura> {
     setState(() => _pin.removeLast());
   }
 
+  bool get _podeContinuar =>
+      _codigo != null && _pin.length == tamanhoPin && _etapa != _Etapa.gravando;
+
+  Future<void> _continuar() async {
+    if (!_podeContinuar) return;
+    if (_etapa == _Etapa.pin) {
+      setState(() {
+        _primeiro
+          ..clear()
+          ..addAll(_pin);
+        _limpar(_pin);
+        _etapa = _Etapa.confirmacao;
+      });
+      return;
+    }
+    if (!_iguais(_primeiro, _pin)) {
+      setState(() {
+        _limpar(_pin);
+        _limpar(_primeiro);
+        _etapa = _Etapa.pin;
+        _aviso = 'Os dois PINs não conferem. Digite de novo.';
+      });
+      return;
+    }
+    setState(() => _etapa = _Etapa.gravando);
+    final pin = List<int>.of(_pin);
+    try {
+      await widget.cofre.criar(pin);
+      if (!mounted) return;
+      final codigo = _codigo!;
+      _limpar(_pin);
+      _limpar(_primeiro);
+      widget.aoConcluir(codigo);
+    } catch (e) {
+      debugPrint(
+        'Kryptos: falha ao gravar a identidade (${e is FalhaDoCofre ? e.codigo : e.runtimeType})',
+      );
+      if (!mounted) return;
+      setState(() {
+        _etapa = _Etapa.confirmacao;
+        _aviso = e is FalhaDoCofre
+            ? 'Não foi possível gravar a identidade (${e.codigo}). Toque em CONTINUAR de novo.'
+            : 'Não foi possível gravar a identidade. Toque em CONTINUAR de novo.';
+      });
+    } finally {
+      _limpar(pin);
+    }
+  }
+
+  static bool _iguais(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    var dif = 0;
+    for (var i = 0; i < a.length; i++) {
+      dif |= a[i] ^ b[i];
+    }
+    return dif == 0;
+  }
+
+  /// Sobrescreve antes de esvaziar: a lista não deixa os dígitos para trás.
+  static void _limpar(List<int> l) {
+    l.fillRange(0, l.length, 0);
+    l.clear();
+  }
+
   @override
   void dispose() {
-    _pin.clear();
+    _limpar(_pin);
+    _limpar(_primeiro);
     _codigo = null;
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Android 15+ desenha o app atrás das barras do sistema. Sem isto, a barra de
-    // 3 botões ganha um véu claro do sistema por cima do fundo escuro.
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: estiloBarras,
-      child: Scaffold(
-        body: SafeArea(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const _Cabecalho(),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text('01 · SEU CÓDIGO', style: estiloRotulo),
-                      const SizedBox(height: 10),
-                      _PainelCodigo(
-                        codigo: _codigo,
-                        falhou: _falhou,
-                        aoGerar: _gerar,
-                      ),
-                      const SizedBox(height: 16),
-                      const Text('02 · PIN DE ACESSO', style: estiloRotulo),
-                      const SizedBox(height: 10),
-                      _CasasPin(preenchidas: _pin.length),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Seis dígitos. Abre o Kryptos neste aparelho.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          height: 1.6,
-                          color: Cores.textoCorrido,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      _Teclado(aoDigitar: _digitar, aoApagar: _apagar),
-                      const SizedBox(height: 14),
-                      const _Aviso(),
-                    ],
-                  ),
-                ),
+    final confirmando = _etapa != _Etapa.pin;
+    final gravando = _etapa == _Etapa.gravando;
+    return MoldeDeEntrada(
+      titulo: 'PRIMEIRA ABERTURA',
+      versaoNucleo: widget.versaoNucleo,
+      conteudo: [
+        const Text('01 · SEU CÓDIGO', style: estiloRotulo),
+        const SizedBox(height: 10),
+        PainelCodigo(
+          codigo: _codigo,
+          legenda: 'Criado neste aparelho, a partir da sua chave.',
+          rodape: [
+            if (_falhou) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'Não foi possível gerar o código. Toque de novo.',
+                key: Key('falha-codigo'),
+                style: estiloAviso,
               ),
-              // CONTINUAR fora da rolagem: fica sempre inteiro, em qualquer altura de tela.
-              const Padding(
-                padding: EdgeInsets.fromLTRB(18, 10, 18, 10),
-                child: _Botao(rotulo: 'CONTINUAR', aoTocar: null),
-              ),
-              _Rodape(versaoNucleo: widget.versaoNucleo),
             ],
-          ),
+            const SizedBox(height: 10),
+            // Depois de gerado, o botão desliga: a identidade é uma só por aparelho.
+            Botao(
+              rotulo: 'GERAR CÓDIGO',
+              aoTocar: _codigo != null ? null : _gerar,
+            ),
+          ],
         ),
-      ),
-    );
-  }
-}
-
-class _Cabecalho extends StatelessWidget {
-  const _Cabecalho();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Cores.ambar, width: 2)),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Linha de base comum, como no visual aprovado. O rótulo da direita é
-          // Expanded: com fonte grande do sistema ele quebra a linha em vez de estourar.
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                'KRYPTOS',
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 6,
-                  color: Cores.ambar,
-                ),
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  'PRIMEIRA ABERTURA',
-                  textAlign: TextAlign.right,
-                  style: estiloRotulo,
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Text(
-                  'SEM NÚMERO · SEM E-MAIL',
-                  style: TextStyle(
-                    fontSize: 11,
-                    letterSpacing: 1,
-                    color: Cores.secundario,
-                  ),
-                ),
-              ),
-              SizedBox(width: 12),
-              Text(
-                'SEM CADASTRO',
-                style: TextStyle(
-                  fontSize: 11,
-                  letterSpacing: 1,
-                  color: Cores.secundario,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PainelCodigo extends StatelessWidget {
-  const _PainelCodigo({
-    required this.codigo,
-    required this.falhou,
-    required this.aoGerar,
-  });
-
-  /// Código já gerado, ou nulo enquanto não houver identidade.
-  final String? codigo;
-  final bool falhou;
-  final VoidCallback aoGerar;
-
-  @override
-  Widget build(BuildContext context) {
-    final gerado = codigo != null;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Cores.painel,
-        border: Border.all(color: Cores.linha),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text('CÓDIGO DE CONTATO', style: estiloRotulo),
-          const SizedBox(height: 6),
+        const SizedBox(height: 16),
+        Text(
+          confirmando ? '02 · REPITA O PIN' : '02 · PIN DE ACESSO',
+          key: const Key('rotulo-pin'),
+          style: estiloRotulo,
+        ),
+        const SizedBox(height: 10),
+        CasasPin(preenchidas: _pin.length),
+        const SizedBox(height: 8),
+        if (_aviso != null)
+          Aviso(_aviso!)
+        else
           Text(
-            codigo ?? '····-····',
-            key: const Key('codigo'),
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 4,
-              color: gerado ? Cores.texto : Cores.secundario,
-            ),
+            confirmando
+                ? 'Digite o mesmo PIN de novo para conferir.'
+                : 'Seis dígitos. Abre o Kryptos neste aparelho.',
+            style: estiloTextoCorrido,
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Criado neste aparelho, a partir da sua chave.',
-            style: TextStyle(
-              fontSize: 11,
-              height: 1.6,
-              color: Cores.textoCorrido,
-            ),
-          ),
-          if (falhou) ...[
-            const SizedBox(height: 6),
-            const Text(
-              'Não foi possível gerar o código. Toque de novo.',
-              key: Key('falha-codigo'),
-              style: TextStyle(fontSize: 11, height: 1.6, color: Cores.laranja),
-            ),
-          ],
-          const SizedBox(height: 10),
-          // Depois de gerado, o botão desliga: a identidade é uma só por aparelho.
-          _Botao(rotulo: 'GERAR CÓDIGO', aoTocar: gerado ? null : aoGerar),
-        ],
-      ),
-    );
-  }
-}
-
-class _CasasPin extends StatelessWidget {
-  const _CasasPin({required this.preenchidas});
-
-  final int preenchidas;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      label: 'PIN: $preenchidas de $tamanhoPin dígitos',
-      excludeSemantics: true,
-      child: Row(
-        children: [
-          for (var i = 0; i < tamanhoPin; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(
-              child: Container(
-                key: Key('casa-$i'),
-                height: 48,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Cores.painel,
-                  border: Border.all(
-                    color: i == preenchidas ? Cores.ambar : Cores.linha,
-                    width: i == preenchidas ? 2 : 1,
-                  ),
-                ),
-                child: i < preenchidas
-                    ? Container(
-                        key: Key('ponto-$i'),
-                        width: 12,
-                        height: 12,
-                        color: Cores.ambar,
-                      )
-                    : null,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _Teclado extends StatelessWidget {
-  const _Teclado({required this.aoDigitar, required this.aoApagar});
-
-  final void Function(int) aoDigitar;
-  final VoidCallback aoApagar;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget tecla(String rotulo, VoidCallback? aoTocar, {String? semantica}) {
-      return Expanded(
-        child: Semantics(
-          button: true,
-          label: semantica ?? rotulo,
-          excludeSemantics: true,
-          child: InkWell(
-            key: Key('tecla-$rotulo'),
-            onTap: aoTocar,
-            child: Container(
-              // 48 dp: o mínimo de alvo de toque do Android (testado).
-              height: 48,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(border: Border.all(color: Cores.linha)),
-              child: Text(
-                rotulo,
-                style: TextStyle(
-                  fontSize: rotulo.length > 1 ? 11 : 20,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: rotulo.length > 1 ? 1 : 0,
-                  color: rotulo.length > 1 ? Cores.secundario : Cores.texto,
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    Widget linha(List<Widget> teclas) => Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Row(
-        children: [
-          for (var i = 0; i < teclas.length; i++) ...[
-            if (i > 0) const SizedBox(width: 6),
-            teclas[i],
-          ],
-        ],
-      ),
-    );
-
-    Widget digito(int d) =>
-        tecla('$d', () => aoDigitar(d), semantica: 'dígito $d');
-
-    return Column(
-      children: [
-        linha([digito(1), digito(2), digito(3)]),
-        linha([digito(4), digito(5), digito(6)]),
-        linha([digito(7), digito(8), digito(9)]),
-        linha([
-          const Expanded(child: SizedBox(height: 48)),
-          digito(0),
-          tecla('APAGAR', aoApagar, semantica: 'apagar último dígito'),
-        ]),
+        const SizedBox(height: 10),
+        Teclado(aoDigitar: _digitar, aoApagar: _apagar, ligado: !gravando),
+        const SizedBox(height: 14),
+        const _AvisoSemCopia(),
       ],
+      // CONTINUAR fora da rolagem: fica sempre inteiro, em qualquer altura de tela.
+      acao: Botao(
+        nome: 'CONTINUAR',
+        rotulo: gravando ? 'GRAVANDO…' : 'CONTINUAR',
+        aoTocar: _podeContinuar ? _continuar : null,
+      ),
     );
   }
 }
 
-class _Aviso extends StatelessWidget {
-  const _Aviso();
+class _AvisoSemCopia extends StatelessWidget {
+  const _AvisoSemCopia();
 
   @override
   Widget build(BuildContext context) {
@@ -404,80 +237,9 @@ class _Aviso extends StatelessWidget {
           ),
           SizedBox(height: 6),
           Text(
-            'Não há número, e-mail nem conta em servidor. A chave e o PIN ficam só neste aparelho.',
-            style: TextStyle(
-              fontSize: 11,
-              height: 1.6,
-              color: Cores.textoCorrido,
-            ),
+            'Não há número, e-mail nem conta em servidor. A chave e o PIN ficam só neste aparelho. Esqueceu o PIN, perdeu a identidade.',
+            style: estiloTextoCorrido,
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Botao extends StatelessWidget {
-  const _Botao({required this.rotulo, required this.aoTocar});
-
-  final String rotulo;
-  final VoidCallback? aoTocar;
-
-  @override
-  Widget build(BuildContext context) {
-    final ligado = aoTocar != null;
-    return Semantics(
-      button: true,
-      enabled: ligado,
-      label: rotulo,
-      excludeSemantics: true,
-      child: InkWell(
-        key: Key('botao-$rotulo'),
-        onTap: aoTocar,
-        child: Container(
-          height: 48,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: ligado ? Cores.ambar : Colors.transparent,
-            border: Border.all(color: ligado ? Cores.ambar : Cores.linha),
-          ),
-          child: Text(
-            rotulo,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 2,
-              color: ligado ? Cores.fundo : Cores.secundario,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Rodape extends StatelessWidget {
-  const _Rodape({required this.versaoNucleo});
-
-  final String versaoNucleo;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      key: const Key('rodape'),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Cores.linha)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            'NÚCLEO v$versaoNucleo',
-            key: const Key('versao-nucleo'),
-            style: estiloRotulo,
-          ),
-          const Text('BUILD DE TESTE', style: estiloRotulo),
         ],
       ),
     );

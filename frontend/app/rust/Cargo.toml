@@ -13,6 +13,8 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 flutter_rust_bridge = "=2.13.0"
 kryptos_nucleo.workspace = true
+anyhow.workspace = true
+zeroize.workspace = true
 
 # Sem os lints do workspace: o frb_generated.rs e codigo gerado.
 [lints.rust]

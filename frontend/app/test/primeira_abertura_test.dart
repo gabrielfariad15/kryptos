@@ -1,118 +1,13 @@
-// Testes da tela no computador, sem o núcleo em Rust (a versão e o gerador do
-// código são injetados).
+// Testes da primeira abertura no computador, sem o núcleo em Rust (a versão, o
+// gerador do código e o cofre são injetados; ver apoio.dart).
 
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kryptos/tela_inicial.dart';
 
-/// Tela de um aparelho: tamanho físico, densidade e barras do sistema (em pixels).
-class Aparelho {
-  const Aparelho(
-    this.nome,
-    this.largura,
-    this.altura,
-    this.densidade,
-    this.barraTopo,
-    this.barraBase,
-  );
-  final String nome;
-  final double largura, altura, densidade, barraTopo, barraBase;
-}
-
-// Medido na captura de 06/11/2026 (1080x2400): casa do PIN de 52 dp = 130 px,
-// logo densidade 2,5; barra de status 110 px; barra de 3 botões 120 px.
-const motorolaEdge40Neo = Aparelho(
-  'motorola edge 40 neo',
-  1080,
-  2400,
-  2.5,
-  110,
-  120,
-);
-// Celular pequeno comum (360 x 740 dp), para provar que nada some quando não cabe.
-const pequeno = Aparelho('pequeno 360x740', 1080, 2220, 3.0, 72, 144);
-
-/// Código do vetor conhecido do núcleo (nucleo/src/codigo.rs), usado como falso.
-const codigoFalso = '2J2F-P63Y';
-
-String gerarFalso() => codigoFalso;
-
-Future<void> abrir(
-  WidgetTester tester, {
-  Aparelho aparelho = motorolaEdge40Neo,
-  String Function() gerarCodigo = gerarFalso,
-}) async {
-  tester.view.physicalSize = Size(aparelho.largura, aparelho.altura);
-  tester.view.devicePixelRatio = aparelho.densidade;
-  tester.view.padding = FakeViewPadding(
-    top: aparelho.barraTopo,
-    bottom: aparelho.barraBase,
-  );
-  tester.view.viewPadding = FakeViewPadding(
-    top: aparelho.barraTopo,
-    bottom: aparelho.barraBase,
-  );
-  addTearDown(tester.view.reset);
-  await tester.pumpWidget(
-    KryptosApp(versaoNucleo: '9.8.7', gerarCodigo: gerarCodigo),
-  );
-}
-
-Future<void> tocarBotao(WidgetTester tester, String rotulo) async {
-  final alvo = find.byKey(Key('botao-$rotulo'));
-  await tester.ensureVisible(alvo);
-  await tester.tap(alvo);
-  await tester.pump();
-}
-
-VoidCallback? acaoDoBotao(WidgetTester tester, String rotulo) =>
-    tester.widget<InkWell>(find.byKey(Key('botao-$rotulo'))).onTap;
-
-/// Linha de base do texto na tela: topo do parágrafo + distância até a base,
-/// medida com o mesmo texto e a mesma escala que o parágrafo usou.
-double linhaDeBase(WidgetTester tester, String texto) {
-  final finder = find.text(texto);
-  final paragrafo = tester.renderObject<RenderParagraph>(finder);
-  final pintor = TextPainter(
-    text: paragrafo.text,
-    textDirection: TextDirection.ltr,
-    textScaler: paragrafo.textScaler,
-  )..layout();
-  final base = pintor.computeDistanceToActualBaseline(TextBaseline.alphabetic);
-  pintor.dispose();
-  return tester.getTopLeft(finder).dy + base;
-}
-
-Future<void> tocar(WidgetTester tester, String rotulo) async {
-  final alvo = find.byKey(Key('tecla-$rotulo'));
-  await tester.ensureVisible(alvo);
-  await tester.tap(alvo);
-  await tester.pump();
-}
-
-int pontos() => find
-    .byWidgetPredicate(
-      (w) =>
-          w.key is ValueKey<String> &&
-          (w.key as ValueKey<String>).value.startsWith('ponto-'),
-    )
-    .evaluate()
-    .length;
-
-/// Carrega a IBM Plex Mono de verdade: a fonte padrão dos testes tem letras
-/// mais largas e daria estouro de layout que não existe no aparelho.
-Future<void> carregarFontes() async {
-  final carregador = FontLoader('IBMPlexMono');
-  for (final peso in ['Regular', 'Medium', 'SemiBold', 'Bold']) {
-    final bytes = File('assets/fonts/IBMPlexMono-$peso.ttf').readAsBytesSync();
-    carregador.addFont(Future.value(ByteData.sublistView(bytes)));
-  }
-  await carregador.load();
-}
+import 'apoio.dart';
 
 void main() {
   setUpAll(carregarFontes);
@@ -311,4 +206,137 @@ void main() {
       expect(find.text(codigoFalso), findsOneWidget);
     },
   );
+
+  // ---------- CONTINUAR e o cofre ----------
+
+  testWidgets('CONTINUAR só liga com o código gerado e os seis dígitos', (
+    tester,
+  ) async {
+    await abrir(tester);
+    await digitar(tester, '135790');
+    expect(
+      acaoDoBotao(tester, 'CONTINUAR'),
+      isNull,
+      reason: 'sem código ainda',
+    );
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    expect(acaoDoBotao(tester, 'CONTINUAR'), isNotNull);
+    await tocar(tester, 'APAGAR');
+    expect(acaoDoBotao(tester, 'CONTINUAR'), isNull, reason: 'cinco dígitos');
+  });
+
+  testWidgets('primeiro CONTINUAR pede o PIN de novo, sem gravar', (
+    tester,
+  ) async {
+    final cofre = CofreFalso();
+    await abrir(tester, cofre: cofre);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    expect(find.text('02 · REPITA O PIN'), findsOneWidget);
+    expect(pontos(), 0);
+    expect(acaoDoBotao(tester, 'CONTINUAR'), isNull);
+    expect(cofre.criados, isEmpty);
+  });
+
+  testWidgets('PINs diferentes voltam ao começo com aviso e não gravam', (
+    tester,
+  ) async {
+    final cofre = CofreFalso();
+    await abrir(tester, cofre: cofre);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    await digitar(tester, '135791');
+    await tocarBotao(tester, 'CONTINUAR');
+    expect(find.text('02 · PIN DE ACESSO'), findsOneWidget);
+    expect(textoDoAviso(tester), contains('não conferem'));
+    expect(pontos(), 0);
+    expect(cofre.criados, isEmpty);
+  });
+
+  testWidgets('PINs iguais gravam no cofre e abrem o cofre com o código', (
+    tester,
+  ) async {
+    final cofre = CofreFalso();
+    await abrir(tester, cofre: cofre);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    await tester.pumpAndSettle();
+    expect(cofre.criados, [
+      [1, 3, 5, 7, 9, 0],
+    ]);
+    expect(find.text('COFRE ABERTO'), findsOneWidget);
+    expect(find.text(codigoFalso), findsOneWidget);
+    // A lista entregue ao cofre foi zerada pela tela depois do uso.
+    expect(cofre.ultimaListaRecebida, isEmpty);
+  });
+
+  testWidgets('enquanto grava, teclado e CONTINUAR ficam desligados', (
+    tester,
+  ) async {
+    final cofre = CofreFalso()..segurar = Completer<void>();
+    await abrir(tester, cofre: cofre);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    expect(find.text('GRAVANDO…'), findsOneWidget);
+    expect(acaoDoBotao(tester, 'CONTINUAR'), isNull);
+    expect(
+      tester.widget<InkWell>(find.byKey(const Key('tecla-1'))).onTap,
+      isNull,
+    );
+    cofre.segurar!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('COFRE ABERTO'), findsOneWidget);
+  });
+
+  testWidgets('falha ao gravar avisa e deixa tentar de novo', (tester) async {
+    final cofre = CofreFalso()..falhaAoCriar = 'DISCO';
+    await abrir(tester, cofre: cofre);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(textoDoAviso(tester), contains('DISCO'));
+    expect(find.text('PRIMEIRA ABERTURA'), findsOneWidget);
+    expect(acaoDoBotao(tester, 'CONTINUAR'), isNotNull);
+
+    cofre.falhaAoCriar = null;
+    await tocarBotao(tester, 'CONTINUAR');
+    await tester.pumpAndSettle();
+    expect(cofre.criados.length, 2);
+    expect(find.text('COFRE ABERTO'), findsOneWidget);
+  });
+
+  testWidgets('na etapa de repetir o PIN, tudo cabe no motorola', (
+    tester,
+  ) async {
+    await abrir(tester);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    conferirQueCabe(tester, 'CONTINUAR');
+  });
+
+  testWidgets('com o aviso de PIN diferente, tudo cabe no motorola', (
+    tester,
+  ) async {
+    await abrir(tester);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    await digitar(tester, '135790');
+    await tocarBotao(tester, 'CONTINUAR');
+    await digitar(tester, '000000');
+    await tocarBotao(tester, 'CONTINUAR');
+    expect(textoDoAviso(tester), isNotNull);
+    conferirQueCabe(tester, 'CONTINUAR');
+  });
 }

@@ -20,12 +20,30 @@ kryptos_nucleo = { path = "nucleo" }
 # Sem os padroes: "libolm-compat" (importar conta do libolm) nao tem uso aqui.
 vodozemac = { version = "=0.11.2", default-features = false, features = ["precomputed-tables"] }
 sha2 = "0.11.0"
+# Cofre da identidade (documentacao/arquitetura/cofre-da-identidade.md).
+# Crates novos na arvore: argon2 e blake2 (medido com cargo tree); os outros ja vinham pelo vodozemac.
+argon2 = { version = "=0.6.0", default-features = false, features = ["alloc", "zeroize"] }
+hkdf = "0.13.0"
+zeroize = "1.9.1"
+getrandom = "0.4.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+base64 = "0.23.1"
+anyhow = "1.0.104"
 axum = "0.8.9"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+
+# Argon2 otimizado tambem no build de debug (o do celular em desenvolvimento): sem
+# isso cada tentativa de PIN levaria varios segundos e a medicao sairia errada.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

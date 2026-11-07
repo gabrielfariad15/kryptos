@@ -8,6 +8,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:kryptos/cofre_do_aparelho.dart';
 import 'package:kryptos/src/rust/api/nucleo.dart';
 import 'package:kryptos/src/rust/frb_generated.dart';
 import 'package:kryptos/tela_inicial.dart';
@@ -17,7 +18,25 @@ final formatoCodigo = RegExp(r'^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$');
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  setUpAll(() async => await RustLib.init());
+  late CofreDoAparelho cofreVazio;
+
+  setUpAll(() async {
+    await RustLib.init();
+    final chave = ChaveDoAparelho();
+    final pastas = await chave.pastas();
+    // Pasta própria e vazia: a tela abre na primeira abertura sem tocar no cofre
+    // de verdade do app.
+    final pasta = '${pastas.semBackup}/teste-ponte';
+    await cofreApagar(pasta: pasta);
+    cofreVazio = CofreDoAparelho(
+      pasta: pasta,
+      chave: chave,
+      alias: 'kryptos-teste-ponte',
+    );
+  });
+
+  setUp(esquecerIdentidade);
+  tearDown(esquecerIdentidade);
 
   testWidgets('núcleo responde pela ponte e a versão aparece na tela', (
     tester,
@@ -25,7 +44,11 @@ void main() {
     final versao = versaoNucleo();
     expect(versao, '0.1.0');
     await tester.pumpWidget(
-      KryptosApp(versaoNucleo: versao, gerarCodigo: gerarCodigoContato),
+      KryptosApp(
+        versaoNucleo: versao,
+        gerarCodigo: gerarCodigoContato,
+        cofre: cofreVazio,
+      ),
     );
     expect(find.text('NÚCLEO v0.1.0'), findsOneWidget);
   });
@@ -34,7 +57,11 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      KryptosApp(versaoNucleo: versaoNucleo(), gerarCodigo: gerarCodigoContato),
+      KryptosApp(
+        versaoNucleo: versaoNucleo(),
+        gerarCodigo: gerarCodigoContato,
+        cofre: cofreVazio,
+      ),
     );
     expect(find.text('····-····'), findsOneWidget);
 
