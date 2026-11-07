@@ -130,8 +130,14 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 | `ferramentas/foto.ps1` | Zipa o assunto para anexar na conversa, deixando de fora segredos e lixo de compilação |
 | `ferramentas/patch.py` | Aplica troca de texto com simulação, âncora única, sintaxe e conferência de sha |
 | `ferramentas/modelo.ps1` | Base de script novo: para no erro, limpa no final, imprime só o resultado |
+| `ferramentas/diagnostico-ambiente.ps1` | Confere, sem alterar nada, se a máquina tem Rust, Flutter, SDK/NDK do Android, gerador da ponte e o celular no cabo |
+| `ferramentas/instalar-ferramentas.ps1` | Instala o que o diagnóstico apontou, com versões fixas, e grava os caminhos no `ambiente.json` |
+| `ferramentas/suite.ps1` | Suíte antes de commit: fmt, clippy, testes Rust, análise e testes do Flutter; com `-Aparelho`, o teste da ponte no celular |
+| `ferramentas/instalar-no-celular.ps1` | Compila, instala, abre o app, confere o logcat e salva a captura da tela em Downloads |
+| `ferramentas/aplicar-pacote.ps1` | Aplica um pacote de arquivos inteiros entregue pelo Claude: confere o sha de antes e de depois e lê de volta |
 
 
 ## Histórico
 
 - 06/11/2026: versão 1, criada do zero para o Kryptos a partir das regras do Lastro e das lições do dia (um bloco que seguia depois do erro; um arquivo da máquina indo para o git). Ganhou as regras de segurança próprias do projeto (seção 8) e a abertura de conversa (seção 10).
+- 06/11/2026: tabela de ferramentas com os cinco scripts da fase 1 (diagnóstico, instalação, suíte, instalação no celular, aplicação de pacote).

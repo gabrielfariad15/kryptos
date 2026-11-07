@@ -7,10 +7,21 @@
 // memória deste widget e não vão para log, disco nem para a tela (regra 8.2).
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../tema.dart';
 
 const tamanhoPin = 6;
+
+/// Barras do sistema: fundo do app aparecendo atrás, ícones claros, sem véu.
+const estiloBarras = SystemUiOverlayStyle(
+  statusBarColor: Colors.transparent,
+  statusBarIconBrightness: Brightness.light,
+  statusBarBrightness: Brightness.dark,
+  systemNavigationBarColor: Colors.transparent,
+  systemNavigationBarIconBrightness: Brightness.light,
+  systemNavigationBarContrastEnforced: false,
+);
 
 class PrimeiraAbertura extends StatefulWidget {
   const PrimeiraAbertura({super.key, required this.versaoNucleo});
@@ -43,46 +54,54 @@ class _PrimeiraAberturaState extends State<PrimeiraAbertura> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const _Cabecalho(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    const Text('01 · SEU CÓDIGO', style: estiloRotulo),
-                    const SizedBox(height: 10),
-                    const _PainelCodigo(),
-                    const SizedBox(height: 22),
-                    const Text('02 · PIN DE ACESSO', style: estiloRotulo),
-                    const SizedBox(height: 10),
-                    _CasasPin(preenchidas: _pin.length),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Seis dígitos. Abre o Kryptos neste aparelho.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        height: 1.6,
-                        color: Cores.textoCorrido,
+    // Android 15+ desenha o app atrás das barras do sistema. Sem isto, a barra de
+    // 3 botões ganha um véu claro do sistema por cima do fundo escuro.
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: estiloBarras,
+      child: Scaffold(
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const _Cabecalho(),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text('01 · SEU CÓDIGO', style: estiloRotulo),
+                      const SizedBox(height: 10),
+                      const _PainelCodigo(),
+                      const SizedBox(height: 16),
+                      const Text('02 · PIN DE ACESSO', style: estiloRotulo),
+                      const SizedBox(height: 10),
+                      _CasasPin(preenchidas: _pin.length),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Seis dígitos. Abre o Kryptos neste aparelho.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          height: 1.6,
+                          color: Cores.textoCorrido,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    _Teclado(aoDigitar: _digitar, aoApagar: _apagar),
-                    const SizedBox(height: 18),
-                    const _Aviso(),
-                    const SizedBox(height: 14),
-                    const _Botao(rotulo: 'CONTINUAR', aoTocar: null),
-                  ],
+                      const SizedBox(height: 10),
+                      _Teclado(aoDigitar: _digitar, aoApagar: _apagar),
+                      const SizedBox(height: 14),
+                      const _Aviso(),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            _Rodape(versaoNucleo: widget.versaoNucleo),
-          ],
+              // CONTINUAR fora da rolagem: fica sempre inteiro, em qualquer altura de tela.
+              const Padding(
+                padding: EdgeInsets.fromLTRB(18, 10, 18, 10),
+                child: _Botao(rotulo: 'CONTINUAR', aoTocar: null),
+              ),
+              _Rodape(versaoNucleo: widget.versaoNucleo),
+            ],
+          ),
         ),
       ),
     );
@@ -95,18 +114,18 @@ class _Cabecalho extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 20, 18, 14),
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Cores.ambar, width: 2)),
       ),
       child: const Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Wrap em vez de Row: com fonte grande do sistema, quebra a linha em vez de estourar.
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.end,
-            runSpacing: 4,
+          // Linha de base comum, como no visual aprovado. O rótulo da direita é
+          // Expanded: com fonte grande do sistema ele quebra a linha em vez de estourar.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: [
               Text(
                 'KRYPTOS',
@@ -117,22 +136,31 @@ class _Cabecalho extends StatelessWidget {
                   color: Cores.ambar,
                 ),
               ),
-              Text('PRIMEIRA ABERTURA', style: estiloRotulo),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'PRIMEIRA ABERTURA',
+                  textAlign: TextAlign.right,
+                  style: estiloRotulo,
+                ),
+              ),
             ],
           ),
           SizedBox(height: 8),
-          Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            runSpacing: 4,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'SEM NÚMERO · SEM E-MAIL',
-                style: TextStyle(
-                  fontSize: 11,
-                  letterSpacing: 1,
-                  color: Cores.secundario,
+              Expanded(
+                child: Text(
+                  'SEM NÚMERO · SEM E-MAIL',
+                  style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 1,
+                    color: Cores.secundario,
+                  ),
                 ),
               ),
+              SizedBox(width: 12),
               Text(
                 'SEM CADASTRO',
                 style: TextStyle(
@@ -175,16 +203,16 @@ class _PainelCodigo extends StatelessWidget {
               color: Cores.secundario,
             ),
           ),
-          SizedBox(height: 8),
+          SizedBox(height: 6),
           Text(
-            'Gerado aqui, a partir da chave criada neste aparelho. É o que você passa aos contatos.',
+            'Criado neste aparelho, a partir da sua chave.',
             style: TextStyle(
               fontSize: 11,
               height: 1.6,
               color: Cores.textoCorrido,
             ),
           ),
-          SizedBox(height: 12),
+          SizedBox(height: 10),
           _Botao(rotulo: 'GERAR CÓDIGO', aoTocar: null),
         ],
       ),
@@ -209,7 +237,7 @@ class _CasasPin extends StatelessWidget {
             Expanded(
               child: Container(
                 key: Key('casa-$i'),
-                height: 52,
+                height: 48,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: Cores.painel,
@@ -253,7 +281,8 @@ class _Teclado extends StatelessWidget {
             key: Key('tecla-$rotulo'),
             onTap: aoTocar,
             child: Container(
-              height: 52,
+              // 48 dp: o mínimo de alvo de toque do Android (testado).
+              height: 48,
               alignment: Alignment.center,
               decoration: BoxDecoration(border: Border.all(color: Cores.linha)),
               child: Text(
@@ -292,7 +321,7 @@ class _Teclado extends StatelessWidget {
         linha([digito(4), digito(5), digito(6)]),
         linha([digito(7), digito(8), digito(9)]),
         linha([
-          const Expanded(child: SizedBox(height: 52)),
+          const Expanded(child: SizedBox(height: 48)),
           digito(0),
           tecla('APAGAR', aoApagar, semantica: 'apagar último dígito'),
         ]),
@@ -383,6 +412,7 @@ class _Rodape extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      key: const Key('rodape'),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: Cores.linha)),
