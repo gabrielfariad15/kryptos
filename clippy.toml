@@ -1,0 +1,3 @@
+# Regra 7.1 vale para codigo de producao; nos testes, unwrap/expect falham o teste com a mensagem do erro.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

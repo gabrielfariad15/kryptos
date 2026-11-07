@@ -1,0 +1,19 @@
+# Ponte entre o app Flutter e o nucleo. So repassa chamadas: nenhuma regra mora aqui.
+# Gerada pelo flutter_rust_bridge_codegen integrate e ajustada para o workspace.
+[package]
+name = "kryptos_ponte"
+version.workspace = true
+edition = "2021"
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "staticlib"]
+
+[dependencies]
+flutter_rust_bridge = "=2.13.0"
+kryptos_nucleo.workspace = true
+
+# Sem os lints do workspace: o frb_generated.rs e codigo gerado.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

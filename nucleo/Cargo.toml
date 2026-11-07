@@ -1,0 +1,15 @@
+[package]
+name = "kryptos_nucleo"
+description = "Motor do Kryptos no aparelho: criptografia, protocolo, queima e memoria"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,32 @@
+# Workspace Rust do Kryptos: um Cargo.lock e um target/ para tudo.
+# Membros:
+#   nucleo              motor do app (roda no aparelho)
+#   backend/relay       servidor de repasse
+#   frontend/app/rust   ponte fina entre o Flutter e o nucleo (flutter_rust_bridge)
+[workspace]
+resolver = "3"
+members = ["nucleo", "backend/relay", "frontend/app/rust"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+# Versoes registradas em documentacao/DEPENDENCIAS.md (regra 8.6).
+[workspace.dependencies]
+kryptos_nucleo = { path = "nucleo" }
+axum = "0.8.9"
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Regra 7.1: nada de unwrap/expect em caminho de producao (os testes podem).
+unwrap_used = "deny"
+expect_used = "deny"
