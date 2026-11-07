@@ -6,14 +6,20 @@
 # Uso (uma linha):
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\suite.ps1
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\suite.ps1 -Aparelho
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\suite.ps1 -Aparelho -Todos
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\suite.ps1 -Aparelho -Serial <serial>
 #
 # -Aparelho tambem roda os testes no celular ligado no cabo (instala o app de teste,
-# confere que o nucleo em Rust responde de dentro do Android e prova o cofre da
-# identidade com o Keystore de verdade).
+# confere que o nucleo em Rust responde de dentro do Android, prova o cofre da
+# identidade com o Keystore de verdade e o QR do contato pela ponte).
+# Sem -Todos nem -Serial, exige um unico celular no cabo. -Todos roda em cada um, um
+# depois do outro; -Serial escolhe um.
 
 [CmdletBinding()]
 param(
-    [switch]$Aparelho
+    [switch]$Aparelho,
+    [switch]$Todos,
+    [string]$Serial
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,6 +72,8 @@ function ContarTestes([string]$texto, [string]$padrao) {
 
 $ok = $false
 try {
+    if ($Todos -and $Serial) { throw 'use -Todos ou -Serial, nao os dois' }
+    if (($Todos -or $Serial) -and -not $Aparelho) { throw '-Todos e -Serial so valem junto com -Aparelho' }
     Set-Location -LiteralPath $Repo
     $flutter = Achar (Join-Path $Amb.flutter 'bin') @('flutter.bat', 'flutter')
     $app = Join-Path (Join-Path $Repo 'frontend') 'app'
@@ -103,18 +111,33 @@ try {
 
     if ($Aparelho) {
         $adb = Achar (Join-Path $Amb.android_sdk 'platform-tools') @('adb.exe', 'adb')
-        $serial = @((Rodar $adb @('devices')) -split "`n" | Select-Object -Skip 1 |
+        # $Serial e o parametro; o PowerShell nao diferencia maiusculas, entao as
+        # variaveis daqui tem outros nomes ($ligados, $alvos, $sAtual).
+        $ligados = @((Rodar $adb @('devices')) -split "`n" | Select-Object -Skip 1 |
             ForEach-Object { $p = $_.Trim() -split '\s+'; if ($p.Count -ge 2 -and $p[1] -eq 'device') { $p[0] } })
-        if ($serial.Count -ne 1) { throw "preciso de exatamente 1 celular autorizado no adb; achei $($serial.Count)" }
-        $modelo = Rodar $adb @('-s', $serial[0], 'shell', 'getprop', 'ro.product.model')
-        Passo "teste no celular: ponte e cofre ($modelo)" {
-            Write-Host '   compila o Rust para Android e instala o app de teste (a primeira vez demora)'
-            $t = Rodar $flutter @('test', 'integration_test', '-d', $serial[0])
-            if ($t -notmatch 'All tests passed') { throw "teste no aparelho sem 'All tests passed'" }
-            # O cofre_test.dart imprime tempos, onde ficou a chave e a varredura (sem segredo).
-            $medidas = @([regex]::Matches($t, 'MEDIDA ([^\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim() })
-            if ($medidas.Count -lt 2) { throw 'o teste do cofre passou sem imprimir as linhas MEDIDA' }
-            'nucleo 0.1.0 dentro do Android; ' + ($medidas -join '; ')
+        if ($ligados.Count -eq 0) { throw 'nenhum celular autorizado no adb' }
+        if ($Serial) {
+            if ($ligados -notcontains $Serial) { throw "serial $Serial nao esta no adb; ligados: $($ligados -join ', ')" }
+            $alvos = @($Serial)
+        } elseif ($Todos) {
+            $alvos = $ligados
+        } else {
+            if ($ligados.Count -ne 1) { throw "ha $($ligados.Count) celulares ligados ($($ligados -join ', ')). Use -Todos ou -Serial <serial>" }
+            $alvos = $ligados
+        }
+        foreach ($sAtual in $alvos) {
+            $modelo = Rodar $adb @('-s', $sAtual, 'shell', 'getprop', 'ro.product.model')
+            Passo "teste no celular: ponte, cofre e QR ($modelo)" {
+                Write-Host "   $modelo [$sAtual]: compila o Rust para Android e instala o app de teste (a primeira vez demora)"
+                $t = Rodar $flutter @('test', 'integration_test', '-d', $sAtual)
+                if ($t -notmatch 'All tests passed') { throw "teste no aparelho sem 'All tests passed'" }
+                # cofre_test.dart e qr_test.dart imprimem tempos, onde ficou a chave e a
+                # varredura (sem segredo).
+                $medidas = @([regex]::Matches($t, 'MEDIDA ([^\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim() })
+                if ($medidas.Count -lt 2) { throw 'o teste do cofre passou sem imprimir as linhas MEDIDA' }
+                if (-not ($medidas | Where-Object { $_ -like 'qr no aparelho*' })) { throw 'o teste do QR passou sem imprimir a linha MEDIDA' }
+                'nucleo 0.1.0 dentro do Android; ' + ($medidas -join '; ')
+            }
         }
     }
 

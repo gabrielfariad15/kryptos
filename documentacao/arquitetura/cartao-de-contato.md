@@ -84,12 +84,34 @@ Medido em 07/11/2026, no computador:
 - **`TryHarder` do leitor:** tirado. Não mudou nem a leitura (106 com e sem) nem o tempo.
 - **Calibração:** seis sabotagens. Cinco derrubaram um teste cada: ignorar o passo da linha, tirar o lado mínimo, tirar o limite de 16 MP, alterar o texto lido e não pôr na agenda o QR achado. A sexta, tirar o `TryHarder`, não derrubou nada, e por isso ele saiu. Isenção: a troca do pânico por erro não tem teste, porque não há quadro conhecido que faça o `rxing` entrar em pânico; ela fica pelo motivo escrito acima. Os 60 quadros de lixo do teste não derrubaram o leitor nem viraram cartão.
 
+## Ponte, câmera e tela (frontend/app)
+
+Decidido em 07/11/2026.
+
+- **Ponte** (`frontend/app/rust/src/api/nucleo.rs`): `grade_propria`, `adicionar_contato_do_quadro` e `contatos`. Só passam a grade do QR próprio, o código de contato e a forma de conferência. O texto do cartão e as chaves ficam no núcleo, e o erro chega como o código fixo da tabela acima.
+- **Câmera** (`lib/camera_do_aparelho.dart`): plugin `camera` 0.12.2, que no Android usa o CameraX. Só a câmera traseira, em YUV 420 e resolução média (480p), sem áudio. O leitor recebe só o plano Y, com o `bytesPerRow` do próprio plano. O NV21 não foi usado: com ele o plugin continua dizendo que o formato é yuv420, e aí o formato declarado deixa de servir de prova.
+- **Um quadro por vez** (`lib/leitor_de_qr.dart`): enquanto um quadro está no núcleo, os que chegam são descartados, não enfileirados. Depois de achar um contato, para.
+- **Permissões:** só `CAMERA`. O plugin declara também microfone e escrita no armazenamento, e o manifesto do app tira os dois. Tira também a leitura do armazenamento, que o Android junta sozinho à escrita: a primeira instalação no Edge, em 07/11/2026, saiu com ela, e o `instalar-no-celular.ps1` recusou. Ele confere no app instalado a cada instalação.
+- **Ciclo de vida:** a câmera desliga com CANCELAR, com voltar e quando o app sai da tela (`hidden` ou `paused`). Não desliga no `inactive`, que chega também com o pedido de permissão aberto por cima.
+- **Tela** (`lib/telas/novo_contato.dart`): aba QR da tela aprovada. Mostra o QR próprio, o código e LER QR DO CONTATO. Depois da leitura, mostra o código lido com "CHAVE CONFERIDA · LIDA POR QR" e o botão MOSTRAR MEU QR, para o outro lado ler também. O módulo do QR tem um número inteiro de pixels da tela e é o maior que cabe na largura. As abas CÓDIGO e SOM não aparecem: ainda não há como trocar o contato por elas.
+- **Medida:** cada tentativa escreve uma linha `MEDIDA qr` no logcat, com o tempo desde a câmera ligada, os quadros lidos e descartados e o tempo médio no núcleo. Nada do QR vai para essa linha. O `ferramentas/medir-leitura-qr.ps1` conta as linhas e aplica a regra de 9 em 10 em menos de 2 s.
+
+Como é provado:
+
+- **Ponte:** um teste em Rust, `grade_quadro_e_agenda_pela_ponte`. A identidade A mostra o QR e a B lê, num quadro com 64 bytes de sobra por linha. Também confere "já estava", o próprio QR, o quadro curto, o passo ignorado e a agenda esvaziada ao esquecer. Calibração: três sabotagens, cada uma derrubou o teste (`novo` sempre verdadeiro, módulos invertidos, margem zero).
+- **No aparelho:** `integration_test/qr_test.dart` faz o mesmo caminho pelo Dart, com o núcleo de verdade, e imprime o tempo de um quadro 640 × 480 com e sem QR. Rodado também no computador contra a biblioteca da ponte para Linux (modo de distribuição): 6 de 6 verdes, 1,3 ms por quadro com ou sem QR, ponte incluída. O número que vale é o do celular.
+- **Tela, no computador** (agenda e câmera falsas): 18 testes em `test/novo_contato_test.dart` e 7 em `test/leitor_de_qr_test.dart`. Calibração: oito sabotagens, cada uma derrubou um teste. Foram feitas: não fechar a câmera ao achar; não fechar ao sair da tela; fechar também no `inactive`; ignorar a sessão depois de a câmera abrir; não descartar quadros; módulo com pixel quebrado; código do contato no log; recusa sem aviso.
+- **Achado no caminho:** o rodapé estourava 15 px com fonte de 160% num celular de 360 dp. O teste novo pegou, e o rodapé agora quebra a linha.
+
 ## O que não resolve
 
 - **Chave Curve25519 de ordem baixa não é recusada na leitura.** Quem recusa é o vodozemac, ao abrir a sessão (`SessionCreationError::NonContributoryKey`, conferido no código da 0.11.2). Fica para o assunto da conversa provar com teste.
 - **Quem mostra o QR pode mostrar a chave de outra pessoa.** Ela não ganha nada com isso, porque não tem a chave secreta, mas o contato fica com o nome errado. A leitura pessoal prova "esta é a chave que este aparelho mostra", não "este aparelho é desta pessoa".
 - **Aparelho comprometido** mostra a chave que o atacante quiser.
 - **Agenda em memória:** fechar o app perde os contatos, e eles precisam ser lidos de novo.
-- **Fotos simuladas não são câmera.** Reflexo na tela, foco, tremor e tela com brilho baixo só aparecem no aparelho. Lá vale a regra de 9 em 10 leituras em menos de 2 s.
+- **Fotos simuladas não são câmera.** Reflexo na tela, foco, tremor e tela com brilho baixo só aparecem no aparelho. Lá vale a regra de 9 em 10 leituras em menos de 2 s, medida pelo `ferramentas/medir-leitura-qr.ps1`.
+- **Brilho da tela:** o app não aumenta o brilho enquanto mostra o QR. Com o brilho no mínimo, a leitura pode piorar.
+- **Prévia deitada:** a prévia da câmera supõe o celular em pé. O app não trava a orientação.
+- **Ida e volta:** cada lado lê o QR do outro, um depois do outro. O app não lembra o outro de ler o seu, além do texto na tela.
 - **Um QR por quadro:** se houver dois QR no quadro, o leitor devolve um só, e pode ser o do outro app.
 - **Print da tela:** o QR é a chave pública, não é segredo, mas quem fotografar a tela ganha o contato. O `FLAG_SECURE` ainda não está no app (a captura do G15 de 07/11/2026 saiu normal).

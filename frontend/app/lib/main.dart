@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'agenda_do_aparelho.dart';
+import 'camera_do_aparelho.dart';
 import 'cofre_do_aparelho.dart';
 import 'src/rust/api/nucleo.dart';
 import 'src/rust/frb_generated.dart';
@@ -17,6 +19,8 @@ Future<void> main() async {
       versaoNucleo: versaoNucleo(),
       gerarCodigo: gerarCodigoContato,
       cofre: CofreDoAparelho(pasta: pastas.semBackup, chave: chave),
+      agenda: const AgendaDoAparelho(),
+      abrirCamera: CameraDoAparelho.new,
     ),
   );
 }

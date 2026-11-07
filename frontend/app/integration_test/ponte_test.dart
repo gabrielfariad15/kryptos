@@ -8,6 +8,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:kryptos/agenda_do_aparelho.dart';
+import 'package:kryptos/camera_do_aparelho.dart';
 import 'package:kryptos/cofre_do_aparelho.dart';
 import 'package:kryptos/src/rust/api/nucleo.dart';
 import 'package:kryptos/src/rust/frb_generated.dart';
@@ -48,6 +50,8 @@ void main() {
         versaoNucleo: versao,
         gerarCodigo: gerarCodigoContato,
         cofre: cofreVazio,
+        agenda: const AgendaDoAparelho(),
+        abrirCamera: CameraDoAparelho.new,
       ),
     );
     expect(find.text('NÚCLEO v0.1.0'), findsOneWidget);
@@ -61,6 +65,8 @@ void main() {
         versaoNucleo: versaoNucleo(),
         gerarCodigo: gerarCodigoContato,
         cofre: cofreVazio,
+        agenda: const AgendaDoAparelho(),
+        abrirCamera: CameraDoAparelho.new,
       ),
     );
     expect(find.text('····-····'), findsOneWidget);

@@ -1,5 +1,6 @@
-// Apoio comum dos testes de tela no computador, sem o núcleo em Rust: aparelhos
-// medidos, fonte de verdade, cofre falso e atalhos de toque.
+// Apoio comum dos testes de tela no computador, sem o núcleo em Rust e sem a câmera:
+// aparelhos medidos, fonte de verdade, cofre, agenda e câmera falsos e atalhos de
+// toque.
 
 import 'dart:async';
 import 'dart:io';
@@ -10,6 +11,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:kryptos/cofre.dart';
+import 'package:kryptos/contatos.dart';
 import 'package:kryptos/tela_inicial.dart';
 
 /// Tela de um aparelho: tamanho físico, densidade e barras do sistema (em pixels).
@@ -90,11 +92,115 @@ class CofreFalso implements Cofre {
   }
 }
 
+/// Grade de mentira com o tamanho da de verdade (37 módulos, margem 4): um xadrez.
+GradeQr gradeFalsa() => GradeQr(
+  lado: 37,
+  margem: 4,
+  modulos: Uint8List.fromList([
+    for (var y = 0; y < 37; y++)
+      for (var x = 0; x < 37; x++) (x + y).isEven ? 1 : 0,
+  ]),
+);
+
+/// Agenda em memória. [responder] decide o que cada quadro devolve.
+class AgendaFalsa implements Agenda {
+  AgendaFalsa({GradeQr? grade, this.semIdentidade = false})
+    : _grade = grade ?? gradeFalsa();
+
+  final GradeQr _grade;
+  final bool semIdentidade;
+  final lista = <ContatoNaAgenda>[];
+  final quadros = <Quadro>[];
+
+  /// Padrão: nenhum QR no quadro.
+  Future<ContatoLido?> Function(Quadro q) responder = (_) async => null;
+
+  @override
+  GradeQr? gradePropria() => semIdentidade ? null : _grade;
+
+  @override
+  Future<ContatoLido?> lerQuadro(Quadro quadro) async {
+    quadros.add(quadro);
+    final r = await responder(quadro);
+    if (r != null && r.novo) {
+      lista.add(ContatoNaAgenda(codigo: r.codigo, conferidoPorQr: true));
+    }
+    return r;
+  }
+
+  @override
+  List<ContatoNaAgenda> contatos() => List.of(lista);
+}
+
+/// Câmera que não liga nada: o teste manda os quadros com [mandar].
+class CameraFalsa implements Camera {
+  String? falhaAoAbrir;
+
+  /// Se definido, `abrir` só termina quando ele completar.
+  Completer<void>? segurarAbertura;
+  bool aberta = false;
+  int fechamentos = 0;
+  void Function(Quadro q)? _aoQuadro;
+
+  bool get recebendo => _aoQuadro != null;
+
+  @override
+  Future<void> abrir() async {
+    await segurarAbertura?.future;
+    final f = falhaAoAbrir;
+    if (f != null) throw FalhaDaCamera(f);
+    aberta = true;
+  }
+
+  @override
+  Widget previa() =>
+      const ColoredBox(key: Key('previa-falsa'), color: Color(0xFF223344));
+
+  @override
+  Future<void> receberQuadros(void Function(Quadro q) aoQuadro) async {
+    _aoQuadro = aoQuadro;
+  }
+
+  void mandar([Quadro? q]) => _aoQuadro?.call(
+    q ??
+        Quadro(
+          brilho: Uint8List(640 * 480),
+          largura: 640,
+          altura: 480,
+          passo: 640,
+        ),
+  );
+
+  @override
+  Future<void> fechar() async {
+    fechamentos++;
+    aberta = false;
+    _aoQuadro = null;
+  }
+}
+
+/// Fábrica que guarda as câmeras que a tela abriu.
+class FabricaDeCameras {
+  final abertas = <CameraFalsa>[];
+  void Function(CameraFalsa c)? preparar;
+
+  CameraFalsa call() {
+    final c = CameraFalsa();
+    preparar?.call(c);
+    abertas.add(c);
+    return c;
+  }
+
+  CameraFalsa get ultima => abertas.last;
+}
+
 Future<void> abrir(
   WidgetTester tester, {
   Aparelho aparelho = motorolaEdge40Neo,
   String Function() gerarCodigo = gerarFalso,
   Cofre? cofre,
+  Agenda? agenda,
+  AbrirCamera? abrirCamera,
 }) async {
   tester.view.physicalSize = Size(aparelho.largura, aparelho.altura);
   tester.view.devicePixelRatio = aparelho.densidade;
@@ -112,6 +218,8 @@ Future<void> abrir(
       versaoNucleo: '9.8.7',
       gerarCodigo: gerarCodigo,
       cofre: cofre ?? CofreFalso(),
+      agenda: agenda ?? AgendaFalsa(),
+      abrirCamera: abrirCamera ?? FabricaDeCameras().call,
     ),
   );
 }

@@ -10,6 +10,8 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_rust_bridge: 2.13.0
+  # Exata: e o que entrega os quadros da camera ao leitor (DEPENDENCIAS.md).
+  camera: 0.12.2
   kryptos_ponte:
     path: rust_builder
 

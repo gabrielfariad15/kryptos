@@ -99,20 +99,30 @@ void main() {
     );
   });
 
-  test('nenhuma chave secreta em claro em arquivo do app', () async {
-    gerarCodigoContato();
-    await cofre.criar(List.of(pin));
-    esquecerIdentidade();
-    await cofre.abrir(List.of(pin));
-    // A varredura procura as chaves da identidade aberta, em 8 formas (bytes,
-    // hex, base64, lista JSON), em todos os arquivos da pasta do app.
-    final v = await procurarSegredos(pasta: pastas.dados);
-    // ignore: avoid_print
-    print(
-      'MEDIDA varredura: ${v.arquivos} arquivos, ${v.ocorrencias} ocorrencias, ${v.ilegiveis} ilegiveis',
-    );
-    expect(v.arquivos, greaterThan(0));
-    expect(v.ocorrencias, 0);
-    expect(v.ilegiveis, 0);
-  });
+  // Prazo de 5 min, não os 30 s padrão: a varredura lê todos os arquivos da pasta do
+  // app e procura as chaves em 8 formas, com o núcleo compilado sem otimização no
+  // build de teste. Medido em 07/11/2026: o teste levou 26 s no Edge; no G15 passou dos 30 s e o
+  // teste caiu por tempo, não por achado. O tempo vai na linha MEDIDA.
+  test(
+    'nenhuma chave secreta em claro em arquivo do app',
+    timeout: const Timeout(Duration(minutes: 5)),
+    () async {
+      gerarCodigoContato();
+      await cofre.criar(List.of(pin));
+      esquecerIdentidade();
+      await cofre.abrir(List.of(pin));
+      // A varredura procura as chaves da identidade aberta, em 8 formas (bytes,
+      // hex, base64, lista JSON), em todos os arquivos da pasta do app.
+      final relogio = Stopwatch()..start();
+      final v = await procurarSegredos(pasta: pastas.dados);
+      final msVarredura = relogio.elapsedMilliseconds;
+      // ignore: avoid_print
+      print(
+        'MEDIDA varredura: ${v.arquivos} arquivos, ${v.ocorrencias} ocorrencias, ${v.ilegiveis} ilegiveis, $msVarredura ms',
+      );
+      expect(v.arquivos, greaterThan(0));
+      expect(v.ocorrencias, 0);
+      expect(v.ilegiveis, 0);
+    },
+  );
 }

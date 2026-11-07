@@ -31,6 +31,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  ContatoLido dco_decode_box_autoadd_contato_lido(dynamic raw);
+
+  @protected
+  GradeDoQr dco_decode_box_autoadd_grade_do_qr(dynamic raw);
+
+  @protected
+  ContatoDaAgenda dco_decode_contato_da_agenda(dynamic raw);
+
+  @protected
+  ContatoLido dco_decode_contato_lido(dynamic raw);
+
+  @protected
+  GradeDoQr dco_decode_grade_do_qr(dynamic raw);
+
+  @protected
+  List<ContatoDaAgenda> dco_decode_list_contato_da_agenda(dynamic raw);
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
 
   @protected
@@ -38,6 +56,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  ContatoLido? dco_decode_opt_box_autoadd_contato_lido(dynamic raw);
+
+  @protected
+  GradeDoQr? dco_decode_opt_box_autoadd_grade_do_qr(dynamic raw);
 
   @protected
   PinPreparado dco_decode_pin_preparado(dynamic raw);
@@ -64,6 +88,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  ContatoLido sse_decode_box_autoadd_contato_lido(SseDeserializer deserializer);
+
+  @protected
+  GradeDoQr sse_decode_box_autoadd_grade_do_qr(SseDeserializer deserializer);
+
+  @protected
+  ContatoDaAgenda sse_decode_contato_da_agenda(SseDeserializer deserializer);
+
+  @protected
+  ContatoLido sse_decode_contato_lido(SseDeserializer deserializer);
+
+  @protected
+  GradeDoQr sse_decode_grade_do_qr(SseDeserializer deserializer);
+
+  @protected
+  List<ContatoDaAgenda> sse_decode_list_contato_da_agenda(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
 
   @protected
@@ -71,6 +115,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  ContatoLido? sse_decode_opt_box_autoadd_contato_lido(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  GradeDoQr? sse_decode_opt_box_autoadd_grade_do_qr(
+    SseDeserializer deserializer,
+  );
 
   @protected
   PinPreparado sse_decode_pin_preparado(SseDeserializer deserializer);
@@ -103,6 +157,36 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_contato_lido(
+    ContatoLido self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_grade_do_qr(
+    GradeDoQr self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_contato_da_agenda(
+    ContatoDaAgenda self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_contato_lido(ContatoLido self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_grade_do_qr(GradeDoQr self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_contato_da_agenda(
+    List<ContatoDaAgenda> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
@@ -113,6 +197,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_contato_lido(
+    ContatoLido? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_grade_do_qr(
+    GradeDoQr? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_pin_preparado(PinPreparado self, SseSerializer serializer);

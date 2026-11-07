@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 
 import 'cofre.dart';
+import 'contatos.dart';
 import 'tema.dart';
 import 'telas/cofre_aberto.dart';
 import 'telas/desbloqueio.dart';
 import 'telas/primeira_abertura.dart';
 
-/// App sem dependência direta da ponte: recebe a versão do núcleo pronta, a função
-/// que gera o código e o cofre, para os testes de tela rodarem no computador sem a
-/// biblioteca em Rust.
+/// App sem dependência direta da ponte nem da câmera: recebe a versão do núcleo
+/// pronta, a função que gera o código, o cofre, a agenda e a câmera, para os testes
+/// de tela rodarem no computador sem a biblioteca em Rust e sem o plugin.
 ///
 /// Sem cofre gravado: primeira abertura. Com cofre: desbloqueio. Depois de um dos
 /// dois: o cofre aberto, com o código.
@@ -18,11 +19,15 @@ class KryptosApp extends StatelessWidget {
     required this.versaoNucleo,
     required this.gerarCodigo,
     required this.cofre,
+    required this.agenda,
+    required this.abrirCamera,
   });
 
   final String versaoNucleo;
   final String Function() gerarCodigo;
   final Cofre cofre;
+  final Agenda agenda;
+  final AbrirCamera abrirCamera;
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +39,8 @@ class KryptosApp extends StatelessWidget {
         versaoNucleo: versaoNucleo,
         gerarCodigo: gerarCodigo,
         cofre: cofre,
+        agenda: agenda,
+        abrirCamera: abrirCamera,
       ),
     );
   }
@@ -44,11 +51,15 @@ class _Entrada extends StatefulWidget {
     required this.versaoNucleo,
     required this.gerarCodigo,
     required this.cofre,
+    required this.agenda,
+    required this.abrirCamera,
   });
 
   final String versaoNucleo;
   final String Function() gerarCodigo;
   final Cofre cofre;
+  final Agenda agenda;
+  final AbrirCamera abrirCamera;
 
   @override
   State<_Entrada> createState() => _EntradaState();
@@ -64,7 +75,12 @@ class _EntradaState extends State<_Entrada> {
   Widget build(BuildContext context) {
     final codigo = _codigo;
     if (codigo != null) {
-      return CofreAberto(versaoNucleo: widget.versaoNucleo, codigo: codigo);
+      return CofreAberto(
+        versaoNucleo: widget.versaoNucleo,
+        codigo: codigo,
+        agenda: widget.agenda,
+        abrirCamera: widget.abrirCamera,
+      );
     }
     if (_temCofre) {
       return Desbloqueio(

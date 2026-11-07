@@ -1,7 +1,8 @@
 # ferramentas/foto.ps1
 # "Foto" do assunto: zipa de uma vez tudo que o assunto toca, para anexar na conversa.
 # Deixa de fora o que nao deve sair da maquina ou so pesa: .git, target, build,
-# .dart_tool, node_modules, segredos, .env, ambiente.json, chaves de assinatura.
+# .dart_tool, node_modules, .gradle, .kotlin, .cxx, segredos, .env, ambiente.json,
+# chaves de assinatura.
 #
 # Uso (uma linha):
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\foto.ps1 nucleo backend\relay
@@ -20,7 +21,8 @@ $arqAmb = Join-Path $PSScriptRoot 'ambiente.json'
 if (-not (Test-Path -LiteralPath $arqAmb)) { Write-Host 'ERRO: falta ferramentas\ambiente.json'; exit 1 }
 $Amb = Get-Content -LiteralPath $arqAmb -Raw -Encoding UTF8 | ConvertFrom-Json
 
-$pastasFora   = @('.git', 'target', 'build', '.dart_tool', 'node_modules', 'segredos')
+# .gradle, .kotlin e .cxx: cache do Gradle, do Kotlin e do NDK dentro de android\.
+$pastasFora   = @('.git', 'target', 'build', '.dart_tool', 'node_modules', 'segredos', '.gradle', '.kotlin', '.cxx')
 $arquivosFora = @('.env', 'ambiente.json', 'key.properties', 'local.properties')
 $extFora      = @('.jks', '.keystore')
 

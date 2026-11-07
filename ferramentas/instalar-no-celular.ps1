@@ -129,6 +129,17 @@ try {
             'Success'
         }
 
+        Passo "$modeloAtual : permissoes" {
+            # O plugin da camera declara microfone e escrita no armazenamento; o
+            # AndroidManifest.xml do app tira os dois. Confere no app instalado.
+            $pacoteInstalado = Rodar $adb @('-s', $s, 'shell', 'dumpsys', 'package', $Pacote)
+            if ($pacoteInstalado -notmatch 'android\.permission\.CAMERA') { throw 'o app instalado nao pede a camera' }
+            $sobrando = @('RECORD_AUDIO', 'WRITE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE', 'FOREGROUND_SERVICE_CAMERA' |
+                Where-Object { $pacoteInstalado -match "android\.permission\.$_\b" })
+            if ($sobrando.Count -gt 0) { throw "o app instalado pede permissao que nao usa: $($sobrando -join ', ')" }
+            'camera sim; microfone e armazenamento nao'
+        }
+
         Passo "$modeloAtual : abrir o app" {
             try { Rodar $adb @('-s', $s, 'logcat', '-c') | Out-Null } catch { Write-Host "   aviso: nao limpei o logcat; a conferencia pode pegar erro antigo" }
             Rodar $adb @('-s', $s, 'shell', 'am', 'start', '-W', '-n', "$Pacote/.MainActivity") | Out-Null

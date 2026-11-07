@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1999118787;
+  int get rustContentHash => -1569456834;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -81,6 +81,13 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<ContatoLido?> crateApiNucleoAdicionarContatoDoQuadro({
+    required List<int> brilho,
+    required int largura,
+    required int altura,
+    required int passo,
+  });
+
   String? crateApiNucleoCodigoAtual();
 
   Future<String> crateApiNucleoCofreAbrir({
@@ -109,9 +116,13 @@ abstract class RustLibApi extends BaseApi {
     required List<int> pin,
   });
 
+  List<ContatoDaAgenda> crateApiNucleoContatos();
+
   void crateApiNucleoEsquecerIdentidade();
 
   String crateApiNucleoGerarCodigoContato();
+
+  GradeDoQr? crateApiNucleoGradePropria();
 
   Future<void> crateApiNucleoInitApp();
 
@@ -129,12 +140,51 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
+  Future<ContatoLido?> crateApiNucleoAdicionarContatoDoQuadro({
+    required List<int> brilho,
+    required int largura,
+    required int altura,
+    required int passo,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(brilho, serializer);
+          sse_encode_u_32(largura, serializer);
+          sse_encode_u_32(altura, serializer);
+          sse_encode_u_32(passo, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 1,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_contato_lido,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoAdicionarContatoDoQuadroConstMeta,
+        argValues: [brilho, largura, altura, passo],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoAdicionarContatoDoQuadroConstMeta =>
+      const TaskConstMeta(
+        debugName: "adicionar_contato_do_quadro",
+        argNames: ["brilho", "largura", "altura", "passo"],
+      );
+
+  @override
   String? crateApiNucleoCodigoAtual() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 1)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 2)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_opt_String,
@@ -164,7 +214,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 3,
             port: port_,
           );
         },
@@ -194,7 +244,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 4,
             port: port_,
           );
         },
@@ -228,7 +278,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 5,
             port: port_,
           );
         },
@@ -255,7 +305,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(pasta, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 5)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_u_32,
@@ -281,7 +331,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(pasta, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 7)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_bool,
@@ -311,7 +361,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 7,
+            funcId: 8,
             port: port_,
           );
         },
@@ -344,7 +394,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 9,
             port: port_,
           );
         },
@@ -366,12 +416,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  List<ContatoDaAgenda> crateApiNucleoContatos() {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 10)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_contato_da_agenda,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNucleoContatosConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoContatosConstMeta =>
+      const TaskConstMeta(debugName: "contatos", argNames: []);
+
+  @override
   void crateApiNucleoEsquecerIdentidade() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 9)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 11)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -393,7 +465,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 10)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -410,6 +482,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "gerar_codigo_contato", argNames: []);
 
   @override
+  GradeDoQr? crateApiNucleoGradePropria() {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_grade_do_qr,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoGradePropriaConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoGradePropriaConstMeta =>
+      const TaskConstMeta(debugName: "grade_propria", argNames: []);
+
+  @override
   Future<void> crateApiNucleoInitApp() {
     return handler.executeNormal(
       NormalTask(
@@ -418,7 +512,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 14,
             port: port_,
           );
         },
@@ -446,7 +540,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 15,
             port: port_,
           );
         },
@@ -470,7 +564,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -505,6 +599,61 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ContatoLido dco_decode_box_autoadd_contato_lido(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_contato_lido(raw);
+  }
+
+  @protected
+  GradeDoQr dco_decode_box_autoadd_grade_do_qr(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_grade_do_qr(raw);
+  }
+
+  @protected
+  ContatoDaAgenda dco_decode_contato_da_agenda(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return ContatoDaAgenda(
+      codigo: dco_decode_String(arr[0]),
+      conferidoPorQr: dco_decode_bool(arr[1]),
+    );
+  }
+
+  @protected
+  ContatoLido dco_decode_contato_lido(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return ContatoLido(
+      codigo: dco_decode_String(arr[0]),
+      novo: dco_decode_bool(arr[1]),
+    );
+  }
+
+  @protected
+  GradeDoQr dco_decode_grade_do_qr(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return GradeDoQr(
+      lado: dco_decode_u_32(arr[0]),
+      margem: dco_decode_u_32(arr[1]),
+      modulos: dco_decode_list_prim_u_8_strict(arr[2]),
+    );
+  }
+
+  @protected
+  List<ContatoDaAgenda> dco_decode_list_contato_da_agenda(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_contato_da_agenda).toList();
+  }
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as List<int>;
@@ -520,6 +669,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  ContatoLido? dco_decode_opt_box_autoadd_contato_lido(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_contato_lido(raw);
+  }
+
+  @protected
+  GradeDoQr? dco_decode_opt_box_autoadd_grade_do_qr(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_grade_do_qr(raw);
   }
 
   @protected
@@ -586,6 +747,62 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ContatoLido sse_decode_box_autoadd_contato_lido(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_contato_lido(deserializer));
+  }
+
+  @protected
+  GradeDoQr sse_decode_box_autoadd_grade_do_qr(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_grade_do_qr(deserializer));
+  }
+
+  @protected
+  ContatoDaAgenda sse_decode_contato_da_agenda(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_codigo = sse_decode_String(deserializer);
+    var var_conferidoPorQr = sse_decode_bool(deserializer);
+    return ContatoDaAgenda(
+      codigo: var_codigo,
+      conferidoPorQr: var_conferidoPorQr,
+    );
+  }
+
+  @protected
+  ContatoLido sse_decode_contato_lido(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_codigo = sse_decode_String(deserializer);
+    var var_novo = sse_decode_bool(deserializer);
+    return ContatoLido(codigo: var_codigo, novo: var_novo);
+  }
+
+  @protected
+  GradeDoQr sse_decode_grade_do_qr(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_lado = sse_decode_u_32(deserializer);
+    var var_margem = sse_decode_u_32(deserializer);
+    var var_modulos = sse_decode_list_prim_u_8_strict(deserializer);
+    return GradeDoQr(lado: var_lado, margem: var_margem, modulos: var_modulos);
+  }
+
+  @protected
+  List<ContatoDaAgenda> sse_decode_list_contato_da_agenda(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <ContatoDaAgenda>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_contato_da_agenda(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -605,6 +822,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  ContatoLido? sse_decode_opt_box_autoadd_contato_lido(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_contato_lido(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  GradeDoQr? sse_decode_opt_box_autoadd_grade_do_qr(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_grade_do_qr(deserializer));
     } else {
       return null;
     }
@@ -676,6 +919,61 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_contato_lido(
+    ContatoLido self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_contato_lido(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_grade_do_qr(
+    GradeDoQr self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_grade_do_qr(self, serializer);
+  }
+
+  @protected
+  void sse_encode_contato_da_agenda(
+    ContatoDaAgenda self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.codigo, serializer);
+    sse_encode_bool(self.conferidoPorQr, serializer);
+  }
+
+  @protected
+  void sse_encode_contato_lido(ContatoLido self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.codigo, serializer);
+    sse_encode_bool(self.novo, serializer);
+  }
+
+  @protected
+  void sse_encode_grade_do_qr(GradeDoQr self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.lado, serializer);
+    sse_encode_u_32(self.margem, serializer);
+    sse_encode_list_prim_u_8_strict(self.modulos, serializer);
+  }
+
+  @protected
+  void sse_encode_list_contato_da_agenda(
+    List<ContatoDaAgenda> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_contato_da_agenda(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_u_8_loose(
     List<int> self,
     SseSerializer serializer,
@@ -704,6 +1002,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_contato_lido(
+    ContatoLido? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_contato_lido(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_grade_do_qr(
+    GradeDoQr? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_grade_do_qr(self, serializer);
     }
   }
 

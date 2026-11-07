@@ -386,15 +386,26 @@ class Rodape extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: Cores.linha)),
       ),
+      // Os dois lados quebram a linha em vez de estourar: com fonte de 160% num
+      // celular de 360 dp, os dois rótulos juntos passam da largura.
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'NÚCLEO v$versaoNucleo',
-            key: const Key('versao-nucleo'),
-            style: estiloRotulo,
+          Expanded(
+            child: Text(
+              'NÚCLEO v$versaoNucleo',
+              key: const Key('versao-nucleo'),
+              style: estiloRotulo,
+            ),
           ),
-          const Text('BUILD DE TESTE', style: estiloRotulo),
+          const SizedBox(width: 12),
+          const Flexible(
+            child: Text(
+              'BUILD DE TESTE',
+              textAlign: TextAlign.right,
+              style: estiloRotulo,
+            ),
+          ),
         ],
       ),
     );

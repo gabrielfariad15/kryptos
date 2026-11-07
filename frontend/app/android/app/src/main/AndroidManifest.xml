@@ -1,4 +1,15 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Câmera só para ler o QR do contato (plugin camera, CameraX). O plugin declara
+         também microfone e escrita no armazenamento, que o Kryptos não usa: saem do
+         manifesto final. A leitura do armazenamento sai também: o Android a junta
+         sozinho à escrita (README do camera_android_camerax; o instalar-no-celular.ps1
+         de 07/11/2026 achou no app instalado). O FOREGROUND_SERVICE_CAMERA não entra:
+         não há leitura em segundo plano. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
     <!-- Sem backup: o cofre da identidade fica em noBackupFilesDir e nada do app vai
          para backup em nuvem ou adb (cofre-da-identidade.md). -->
     <application

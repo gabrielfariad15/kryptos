@@ -67,6 +67,96 @@ Future<void> cofreApagar({required String pasta}) =>
 Future<Varredura> procurarSegredos({required String pasta}) =>
     RustLib.instance.api.crateApiNucleoProcurarSegredos(pasta: pasta);
 
+/// Grade do QR da identidade na memória, ou nada se não há identidade.
+GradeDoQr? gradePropria() => RustLib.instance.api.crateApiNucleoGradePropria();
+
+/// Procura um QR no plano de brilho (Y) de um quadro da câmera e, se achar um cartão
+/// aceito, põe o contato na agenda. Nada: o quadro não tem QR legível.
+/// `passo` é o `bytesPerRow` do plano, que pode passar da largura.
+Future<ContatoLido?> adicionarContatoDoQuadro({
+  required List<int> brilho,
+  required int largura,
+  required int altura,
+  required int passo,
+}) => RustLib.instance.api.crateApiNucleoAdicionarContatoDoQuadro(
+  brilho: brilho,
+  largura: largura,
+  altura: altura,
+  passo: passo,
+);
+
+/// Agenda desta execução, na ordem em que os contatos entraram.
+List<ContatoDaAgenda> contatos() =>
+    RustLib.instance.api.crateApiNucleoContatos();
+
+/// Um contato da agenda desta execução.
+class ContatoDaAgenda {
+  final String codigo;
+
+  /// A chave veio inteira do QR lido pessoalmente.
+  final bool conferidoPorQr;
+
+  const ContatoDaAgenda({required this.codigo, required this.conferidoPorQr});
+
+  @override
+  int get hashCode => codigo.hashCode ^ conferidoPorQr.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ContatoDaAgenda &&
+          runtimeType == other.runtimeType &&
+          codigo == other.codigo &&
+          conferidoPorQr == other.conferidoPorQr;
+}
+
+/// Contato achado num quadro da câmera.
+class ContatoLido {
+  final String codigo;
+
+  /// `false`: já estava na agenda com as mesmas chaves.
+  final bool novo;
+
+  const ContatoLido({required this.codigo, required this.novo});
+
+  @override
+  int get hashCode => codigo.hashCode ^ novo.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ContatoLido &&
+          runtimeType == other.runtimeType &&
+          codigo == other.codigo &&
+          novo == other.novo;
+}
+
+/// Grade do QR deste aparelho: `lado` × `lado` módulos, linha por linha, 1 = escuro.
+/// A tela desenha a margem clara de `margem` módulos em volta.
+class GradeDoQr {
+  final int lado;
+  final int margem;
+  final Uint8List modulos;
+
+  const GradeDoQr({
+    required this.lado,
+    required this.margem,
+    required this.modulos,
+  });
+
+  @override
+  int get hashCode => lado.hashCode ^ margem.hashCode ^ modulos.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is GradeDoQr &&
+          runtimeType == other.runtimeType &&
+          lado == other.lado &&
+          margem == other.margem &&
+          modulos == other.modulos;
+}
+
 /// Sal novo e PIN esticado (Argon2id), para o HMAC do Keystore.
 class PinPreparado {
   final Uint8List sal;

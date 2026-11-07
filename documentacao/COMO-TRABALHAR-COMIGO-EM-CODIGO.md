@@ -128,13 +128,14 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 | Arquivo | Para quê |
 |---|---|
 | `ferramentas/criar-estrutura.ps1` | Monta as pastas do repositório numa máquina nova e gera o `ambiente.json` |
-| `ferramentas/foto.ps1` | Zipa o assunto para anexar na conversa, deixando de fora segredos e lixo de compilação |
+| `ferramentas/foto.ps1` | Zipa o assunto para anexar na conversa, deixando de fora segredos, lixo de compilação e cache do Gradle |
 | `ferramentas/patch.py` | Aplica troca de texto com simulação, âncora única, sintaxe e conferência de sha |
 | `ferramentas/modelo.ps1` | Base de script novo: para no erro, limpa no final, imprime só o resultado |
 | `ferramentas/diagnostico-ambiente.ps1` | Confere, sem alterar nada, se a máquina tem Rust, Flutter, SDK/NDK do Android, gerador da ponte e o celular no cabo |
 | `ferramentas/instalar-ferramentas.ps1` | Instala o que o diagnóstico apontou, com versões fixas, e grava os caminhos no `ambiente.json` |
-| `ferramentas/suite.ps1` | Suíte antes de commit: fmt, clippy, testes Rust, análise e testes do Flutter; com `-Aparelho`, os testes da ponte e do cofre no celular, com as medidas |
-| `ferramentas/instalar-no-celular.ps1` | Compila uma vez, instala, abre o app, confere o logcat, informa tamanho e densidade da tela e salva a captura em Downloads; com mais de um celular, `-Todos` ou `-Serial` |
+| `ferramentas/suite.ps1` | Suíte antes de commit: fmt, clippy, testes Rust, análise e testes do Flutter; com `-Aparelho`, os testes da ponte, do cofre e do QR no celular, com as medidas; com mais de um celular, `-Todos` ou `-Serial` |
+| `ferramentas/instalar-no-celular.ps1` | Compila uma vez, instala, confere as permissões do app instalado (câmera sim, microfone e armazenamento não), abre o app, confere o logcat, informa tamanho e densidade da tela e salva a captura em Downloads; com mais de um celular, `-Todos` ou `-Serial` |
+| `ferramentas/medir-leitura-qr.ps1` | Limpa o logcat, espera as leituras do QR feitas à mão e conta as linhas `MEDIDA qr`: regra de 9 em 10 em menos de 2 s, por celular; `-Todos` ou `-Serial` |
 | `ferramentas/aplicar-pacote.ps1` | Aplica um pacote de arquivos inteiros entregue pelo Claude: confere o sha de antes e de depois e lê de volta |
 | `ferramentas/conferir-fim-de-linha.ps1` | Confere pelo `git ls-files --eol` se todo arquivo rastreado segue o `.gitattributes`; a suíte chama |
 | `ferramentas/oraculos/cofre.py` | Recalcula, sem o código Rust, os vetores conhecidos do cofre da identidade (só quando o formato mudar) |
@@ -147,3 +148,4 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 - 06/11/2026: tabela de ferramentas com os cinco scripts da fase 1 (diagnóstico, instalação, suíte, instalação no celular, aplicação de pacote).
 - 06/11/2026: fim de linha fixado pelo `.gitattributes` (regra 3.6), conferido pela suíte. Motivo: o `core.autocrlf` do Windows deixava o mesmo arquivo com sha diferente entre máquinas, e `.cmd` com LF pode falhar no cmd.exe.
 - 07/11/2026: tabela de ferramentas com o oráculo do cofre; a suíte com `-Aparelho` passa a provar o cofre da identidade no celular.
+- 07/11/2026: `suite.ps1 -Aparelho` ganha `-Todos` e `-Serial` e prova o QR do contato; `foto.ps1` deixa de fora `.gradle`, `.kotlin` e `.cxx`; ferramenta nova `medir-leitura-qr.ps1`. Motivo: o teste do QR precisa dos dois celulares no cabo, e a foto levava o cache do Gradle.
