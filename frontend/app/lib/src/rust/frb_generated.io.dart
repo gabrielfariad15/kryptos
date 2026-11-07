@@ -37,6 +37,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   GradeDoQr dco_decode_box_autoadd_grade_do_qr(dynamic raw);
 
   @protected
+  ChegadaDaCarta dco_decode_chegada_da_carta(dynamic raw);
+
+  @protected
   ContatoDaAgenda dco_decode_contato_da_agenda(dynamic raw);
 
   @protected
@@ -49,10 +52,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ContatoDaAgenda> dco_decode_list_contato_da_agenda(dynamic raw);
 
   @protected
+  List<MensagemNaCaixa> dco_decode_list_mensagem_na_caixa(dynamic raw);
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  MensagemLida dco_decode_mensagem_lida(dynamic raw);
+
+  @protected
+  MensagemNaCaixa dco_decode_mensagem_na_caixa(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -94,6 +106,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   GradeDoQr sse_decode_box_autoadd_grade_do_qr(SseDeserializer deserializer);
 
   @protected
+  ChegadaDaCarta sse_decode_chegada_da_carta(SseDeserializer deserializer);
+
+  @protected
   ContatoDaAgenda sse_decode_contato_da_agenda(SseDeserializer deserializer);
 
   @protected
@@ -108,10 +123,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<MensagemNaCaixa> sse_decode_list_mensagem_na_caixa(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  MensagemLida sse_decode_mensagem_lida(SseDeserializer deserializer);
+
+  @protected
+  MensagemNaCaixa sse_decode_mensagem_na_caixa(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
@@ -169,6 +195,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_chegada_da_carta(
+    ChegadaDaCarta self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_contato_da_agenda(
     ContatoDaAgenda self,
     SseSerializer serializer,
@@ -187,11 +219,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_mensagem_na_caixa(
+    List<MensagemNaCaixa> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_mensagem_lida(MensagemLida self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_mensagem_na_caixa(
+    MensagemNaCaixa self,
     SseSerializer serializer,
   );
 

@@ -220,6 +220,8 @@ pub enum ErroConversa {
     SemConversa,
     /// Texto acima de `caixa::MAXIMO_TEXTO`.
     TextoGrande,
+    /// A carta não pôde ser montada.
+    Carta(ErroProtocolo),
 }
 
 impl ErroConversa {
@@ -232,6 +234,7 @@ impl ErroConversa {
             Self::ContatoDesconhecido => "CONTATO_DESCONHECIDO",
             Self::SemConversa => "SEM_CONVERSA",
             Self::TextoGrande => "TEXTO_GRANDE",
+            Self::Carta(e) => e.codigo(),
         }
     }
 }
@@ -522,6 +525,30 @@ pub fn cifrar(codigo: CodigoContato, texto: &[u8]) -> Result<OlmMessage, ErroCon
     let memoria = guarda.as_mut().ok_or(ErroConversa::SemIdentidade)?;
     let sessao = memoria.conversa(codigo).ok_or(ErroConversa::SemConversa)?;
     Ok(sessao.cifrar(texto)?)
+}
+
+/// Cifra para um contato com conversa aberta e monta a carta para ele (destinatário =
+/// a Ed25519 do contato), pronta para qualquer transporte.
+pub fn cifrar_carta(codigo: CodigoContato, texto: &[u8]) -> Result<Vec<u8>, ErroConversa> {
+    let destinatario = {
+        let guarda = trava();
+        let memoria = guarda.as_ref().ok_or(ErroConversa::SemIdentidade)?;
+        *memoria.contato(codigo)?.chaves().ed25519.as_bytes()
+    };
+    let mensagem = cifrar(codigo, texto)?;
+    let (tipo, mensagem) = mensagem.to_parts();
+    let tipo = if tipo == crate::sessao::TIPO_PRIMEIRA {
+        kryptos_protocolo::carta::Tipo::Primeira
+    } else {
+        kryptos_protocolo::carta::Tipo::Normal
+    };
+    Carta {
+        destinatario,
+        tipo,
+        mensagem,
+    }
+    .codificar()
+    .map_err(ErroConversa::Carta)
 }
 
 /// Recebe uma mensagem de um contato da agenda.
@@ -2064,6 +2091,34 @@ mod testes {
             reabrir(pasta)?;
             assert!(caixa()?.is_empty());
             assert!(caixa::ler_indice(pasta)?.is_some());
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn carta_cifrada_vai_para_o_contato_e_abre_do_outro_lado()
+    -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("carta-saida", |pasta| {
+            let ks = KeystoreDasGavetas::novo();
+            b_com_cofre(pasta)?;
+            let (a, mut sessao_a) = a_conversa_com_b()?;
+            chegar(&ks, &carta_para_b(&sessao_a.cifrar(b"oi")?)?)?;
+            let bytes = cifrar_carta(a.codigo_contato(), b"resposta de B")?;
+            let carta = Carta::ler(&bytes)?;
+            assert_eq!(carta.destinatario, *a.chaves_publicas().ed25519.as_bytes());
+            assert_eq!(carta.tipo, kryptos_protocolo::carta::Tipo::Normal);
+            let m = crate::sessao::ler_mensagem(usize::from(carta.tipo.numero()), &carta.mensagem)?;
+            assert_eq!(sessao_a.decifrar(&m)?.as_slice(), b"resposta de B");
+            // contato sem conversa aberta e texto grande não viram carta
+            let (outro, _) = a_que_leu_o_qr_de_b()?;
+            assert_eq!(
+                cifrar_carta(outro.codigo_contato(), b"x").err(),
+                Some(ErroConversa::ContatoDesconhecido)
+            );
+            assert_eq!(
+                cifrar_carta(a.codigo_contato(), &vec![0u8; caixa::MAXIMO_TEXTO + 1]).err(),
+                Some(ErroConversa::TextoGrande)
+            );
             Ok(())
         })
     }

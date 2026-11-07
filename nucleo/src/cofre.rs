@@ -114,6 +114,8 @@ pub enum ErroCofre {
     GavetaNaoAbre,
     /// Texto acima de `caixa::MAXIMO_TEXTO`.
     TextoGrande,
+    /// A busca das formas não pôde ser montada (memória).
+    Varredura,
 }
 
 impl ErroCofre {
@@ -138,6 +140,7 @@ impl ErroCofre {
             Self::CaixaVersaoDesconhecida => "CAIXA_VERSAO_DESCONHECIDA",
             Self::GavetaNaoAbre => "GAVETA_NAO_ABRE",
             Self::TextoGrande => "TEXTO_GRANDE",
+            Self::Varredura => "VARREDURA",
         }
     }
 }
@@ -516,14 +519,21 @@ fn formas(segredo: &[u8]) -> Vec<Zeroizing<Vec<u8>>> {
     f
 }
 
-fn contem(palheiro: &[u8], agulha: &[u8]) -> bool {
-    !agulha.is_empty() && palheiro.windows(agulha.len()).any(|w| w == agulha)
-}
-
 /// Procura os segredos dados, em todas as formas de `formas`, em todos os arquivos da
-/// pasta (recursivo, sem seguir atalhos). Devolve só contagens.
+/// pasta (recursivo, sem seguir atalhos). Devolve só contagens: `ocorrencias` soma,
+/// em cada arquivo, quantas formas aparecem nele.
+///
+/// Uma passada só por arquivo para todas as formas (Aho-Corasick, com sobreposição):
+/// com a caixa, a pasta passou a ter 6,5 MB, e comparar forma por forma ficava lento
+/// demais no celular com o núcleo sem otimização (o teste no aparelho).
 pub fn procurar(pasta: &Path, segredos: &[Zeroizing<Vec<u8>>]) -> Resultado<Varredura> {
-    let agulhas: Vec<Zeroizing<Vec<u8>>> = segredos.iter().flat_map(|s| formas(s)).collect();
+    let agulhas: Vec<Zeroizing<Vec<u8>>> = segredos
+        .iter()
+        .flat_map(|s| formas(s))
+        .filter(|a| !a.is_empty())
+        .collect();
+    let busca = aho_corasick::AhoCorasick::new(agulhas.iter().map(|a| a.as_slice()))
+        .map_err(|_| ErroCofre::Varredura)?;
     let mut v = Varredura::default();
     let mut pendentes = vec![pasta.to_path_buf()];
     while let Some(dir) = pendentes.pop() {
@@ -550,11 +560,14 @@ pub fn procurar(pasta: &Path, segredos: &[Zeroizing<Vec<u8>>]) -> Resultado<Varr
                     Ok(conteudo) => {
                         let conteudo = Zeroizing::new(conteudo);
                         v.arquivos += 1;
-                        for a in &agulhas {
-                            if contem(&conteudo, a) {
-                                v.ocorrencias += 1;
-                            }
+                        let mut achadas = vec![false; agulhas.len()];
+                        for m in busca.find_overlapping_iter(conteudo.as_slice()) {
+                            achadas[m.pattern().as_usize()] = true;
                         }
+                        let n = achadas.iter().filter(|&&a| a).count();
+                        v.ocorrencias = v
+                            .ocorrencias
+                            .saturating_add(u32::try_from(n).unwrap_or(u32::MAX));
                     }
                     Err(_) => v.ilegiveis += 1,
                 }

@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1569456834;
+  int get rustContentHash => -237415713;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -81,11 +81,52 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 }
 
 abstract class RustLibApi extends BaseApi {
+  Future<void> crateApiNucleoAbrirConversa({
+    required String codigo,
+    required List<int> avulsa,
+  });
+
   Future<ContatoLido?> crateApiNucleoAdicionarContatoDoQuadro({
     required List<int> brilho,
     required int largura,
     required int altura,
     required int passo,
+  });
+
+  Future<ContatoLido> crateApiNucleoAdicionarContatoPorTexto({
+    required String texto,
+  });
+
+  Future<void> crateApiNucleoCaixaChaveTrocada({required int gaveta});
+
+  Future<void> crateApiNucleoCaixaDesistirDaChegada();
+
+  Future<MensagemLida> crateApiNucleoCaixaLer({
+    required int gaveta,
+    required List<int> hmac,
+  });
+
+  Future<List<MensagemNaCaixa>> crateApiNucleoCaixaListar();
+
+  Future<int> crateApiNucleoCaixaNaoAbertas();
+
+  Future<Uint8List> crateApiNucleoCaixaPedidoDeLeitura({required int gaveta});
+
+  Future<Uint8List> crateApiNucleoCaixaQueimarLidas();
+
+  Future<Uint8List> crateApiNucleoCaixaQueimarVencidas();
+
+  Future<ChegadaDaCarta> crateApiNucleoCaixaReceberCarta({
+    required List<int> carta,
+  });
+
+  Future<int> crateApiNucleoCaixaSelarChegada({required List<int> hmac});
+
+  String? crateApiNucleoCartaoProprioTexto();
+
+  Future<Uint8List> crateApiNucleoCifrarCarta({
+    required String codigo,
+    required List<int> texto,
   });
 
   String? crateApiNucleoCodigoAtual();
@@ -126,7 +167,14 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiNucleoInitApp();
 
+  Future<Uint8List> crateApiNucleoNovaChaveAvulsa();
+
   Future<Varredura> crateApiNucleoProcurarSegredos({required String pasta});
+
+  Future<Varredura> crateApiNucleoProcurarTexto({
+    required String pasta,
+    required List<int> texto,
+  });
 
   String crateApiNucleoVersaoNucleo();
 }
@@ -138,6 +186,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required super.generalizedFrbRustBinding,
     required super.portManager,
   });
+
+  @override
+  Future<void> crateApiNucleoAbrirConversa({
+    required String codigo,
+    required List<int> avulsa,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(codigo, serializer);
+          sse_encode_list_prim_u_8_loose(avulsa, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 1,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoAbrirConversaConstMeta,
+        argValues: [codigo, avulsa],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoAbrirConversaConstMeta =>
+      const TaskConstMeta(
+        debugName: "abrir_conversa",
+        argNames: ["codigo", "avulsa"],
+      );
 
   @override
   Future<ContatoLido?> crateApiNucleoAdicionarContatoDoQuadro({
@@ -157,7 +240,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 1,
+            funcId: 2,
             port: port_,
           );
         },
@@ -179,12 +262,391 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<ContatoLido> crateApiNucleoAdicionarContatoPorTexto({
+    required String texto,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(texto, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_contato_lido,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoAdicionarContatoPorTextoConstMeta,
+        argValues: [texto],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoAdicionarContatoPorTextoConstMeta =>
+      const TaskConstMeta(
+        debugName: "adicionar_contato_por_texto",
+        argNames: ["texto"],
+      );
+
+  @override
+  Future<void> crateApiNucleoCaixaChaveTrocada({required int gaveta}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_8(gaveta, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaChaveTrocadaConstMeta,
+        argValues: [gaveta],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaChaveTrocadaConstMeta =>
+      const TaskConstMeta(
+        debugName: "caixa_chave_trocada",
+        argNames: ["gaveta"],
+      );
+
+  @override
+  Future<void> crateApiNucleoCaixaDesistirDaChegada() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaDesistirDaChegadaConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaDesistirDaChegadaConstMeta =>
+      const TaskConstMeta(debugName: "caixa_desistir_da_chegada", argNames: []);
+
+  @override
+  Future<MensagemLida> crateApiNucleoCaixaLer({
+    required int gaveta,
+    required List<int> hmac,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_8(gaveta, serializer);
+          sse_encode_list_prim_u_8_loose(hmac, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_mensagem_lida,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaLerConstMeta,
+        argValues: [gaveta, hmac],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaLerConstMeta =>
+      const TaskConstMeta(debugName: "caixa_ler", argNames: ["gaveta", "hmac"]);
+
+  @override
+  Future<List<MensagemNaCaixa>> crateApiNucleoCaixaListar() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_mensagem_na_caixa,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaListarConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaListarConstMeta =>
+      const TaskConstMeta(debugName: "caixa_listar", argNames: []);
+
+  @override
+  Future<int> crateApiNucleoCaixaNaoAbertas() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 8,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_32,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaNaoAbertasConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaNaoAbertasConstMeta =>
+      const TaskConstMeta(debugName: "caixa_nao_abertas", argNames: []);
+
+  @override
+  Future<Uint8List> crateApiNucleoCaixaPedidoDeLeitura({required int gaveta}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_8(gaveta, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaPedidoDeLeituraConstMeta,
+        argValues: [gaveta],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaPedidoDeLeituraConstMeta =>
+      const TaskConstMeta(
+        debugName: "caixa_pedido_de_leitura",
+        argNames: ["gaveta"],
+      );
+
+  @override
+  Future<Uint8List> crateApiNucleoCaixaQueimarLidas() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 10,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaQueimarLidasConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaQueimarLidasConstMeta =>
+      const TaskConstMeta(debugName: "caixa_queimar_lidas", argNames: []);
+
+  @override
+  Future<Uint8List> crateApiNucleoCaixaQueimarVencidas() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaQueimarVencidasConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaQueimarVencidasConstMeta =>
+      const TaskConstMeta(debugName: "caixa_queimar_vencidas", argNames: []);
+
+  @override
+  Future<ChegadaDaCarta> crateApiNucleoCaixaReceberCarta({
+    required List<int> carta,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(carta, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 12,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_chegada_da_carta,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaReceberCartaConstMeta,
+        argValues: [carta],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaReceberCartaConstMeta =>
+      const TaskConstMeta(
+        debugName: "caixa_receber_carta",
+        argNames: ["carta"],
+      );
+
+  @override
+  Future<int> crateApiNucleoCaixaSelarChegada({required List<int> hmac}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(hmac, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_8,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCaixaSelarChegadaConstMeta,
+        argValues: [hmac],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCaixaSelarChegadaConstMeta =>
+      const TaskConstMeta(debugName: "caixa_selar_chegada", argNames: ["hmac"]);
+
+  @override
+  String? crateApiNucleoCartaoProprioTexto() {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_String,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNucleoCartaoProprioTextoConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCartaoProprioTextoConstMeta =>
+      const TaskConstMeta(debugName: "cartao_proprio_texto", argNames: []);
+
+  @override
+  Future<Uint8List> crateApiNucleoCifrarCarta({
+    required String codigo,
+    required List<int> texto,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(codigo, serializer);
+          sse_encode_list_prim_u_8_loose(texto, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 15,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoCifrarCartaConstMeta,
+        argValues: [codigo, texto],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoCifrarCartaConstMeta => const TaskConstMeta(
+    debugName: "cifrar_carta",
+    argNames: ["codigo", "texto"],
+  );
+
+  @override
   String? crateApiNucleoCodigoAtual() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 2)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_opt_String,
@@ -214,7 +676,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 17,
             port: port_,
           );
         },
@@ -244,7 +706,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 18,
             port: port_,
           );
         },
@@ -278,7 +740,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 19,
             port: port_,
           );
         },
@@ -305,7 +767,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(pasta, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 6)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 20)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_u_32,
@@ -331,7 +793,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(pasta, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 7)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 21)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_bool,
@@ -361,7 +823,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 22,
             port: port_,
           );
         },
@@ -394,7 +856,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 23,
             port: port_,
           );
         },
@@ -421,7 +883,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 10)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 24)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_list_contato_da_agenda,
@@ -443,7 +905,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 11)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 25)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -465,7 +927,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 26)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -487,7 +949,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 27)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_opt_box_autoadd_grade_do_qr,
@@ -512,7 +974,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 28,
             port: port_,
           );
         },
@@ -531,6 +993,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "init_app", argNames: []);
 
   @override
+  Future<Uint8List> crateApiNucleoNovaChaveAvulsa() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 29,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoNovaChaveAvulsaConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoNovaChaveAvulsaConstMeta =>
+      const TaskConstMeta(debugName: "nova_chave_avulsa", argNames: []);
+
+  @override
   Future<Varredura> crateApiNucleoProcurarSegredos({required String pasta}) {
     return handler.executeNormal(
       NormalTask(
@@ -540,7 +1029,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 30,
             port: port_,
           );
         },
@@ -559,12 +1048,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "procurar_segredos", argNames: ["pasta"]);
 
   @override
+  Future<Varredura> crateApiNucleoProcurarTexto({
+    required String pasta,
+    required List<int> texto,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(pasta, serializer);
+          sse_encode_list_prim_u_8_loose(texto, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 31,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_varredura,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoProcurarTextoConstMeta,
+        argValues: [pasta, texto],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoProcurarTextoConstMeta =>
+      const TaskConstMeta(
+        debugName: "procurar_texto",
+        argNames: ["pasta", "texto"],
+      );
+
+  @override
   String crateApiNucleoVersaoNucleo() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 32)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -611,6 +1135,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ChegadaDaCarta dco_decode_chegada_da_carta(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return ChegadaDaCarta(
+      tipo: dco_decode_String(arr[0]),
+      gaveta: dco_decode_u_8(arr[1]),
+      pedido: dco_decode_list_prim_u_8_strict(arr[2]),
+    );
+  }
+
+  @protected
   ContatoDaAgenda dco_decode_contato_da_agenda(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -654,6 +1191,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<MensagemNaCaixa> dco_decode_list_mensagem_na_caixa(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_mensagem_na_caixa).toList();
+  }
+
+  @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as List<int>;
@@ -663,6 +1206,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
+  }
+
+  @protected
+  MensagemLida dco_decode_mensagem_lida(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return MensagemLida(
+      remetente: dco_decode_String(arr[0]),
+      texto: dco_decode_list_prim_u_8_strict(arr[1]),
+    );
+  }
+
+  @protected
+  MensagemNaCaixa dco_decode_mensagem_na_caixa(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return MensagemNaCaixa(
+      gaveta: dco_decode_u_8(arr[0]),
+      lida: dco_decode_bool(arr[1]),
+    );
   }
 
   @protected
@@ -761,6 +1328,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ChegadaDaCarta sse_decode_chegada_da_carta(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_tipo = sse_decode_String(deserializer);
+    var var_gaveta = sse_decode_u_8(deserializer);
+    var var_pedido = sse_decode_list_prim_u_8_strict(deserializer);
+    return ChegadaDaCarta(
+      tipo: var_tipo,
+      gaveta: var_gaveta,
+      pedido: var_pedido,
+    );
+  }
+
+  @protected
   ContatoDaAgenda sse_decode_contato_da_agenda(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_codigo = sse_decode_String(deserializer);
@@ -803,6 +1383,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<MensagemNaCaixa> sse_decode_list_mensagem_na_caixa(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <MensagemNaCaixa>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_mensagem_na_caixa(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -814,6 +1408,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
+  MensagemLida sse_decode_mensagem_lida(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_remetente = sse_decode_String(deserializer);
+    var var_texto = sse_decode_list_prim_u_8_strict(deserializer);
+    return MensagemLida(remetente: var_remetente, texto: var_texto);
+  }
+
+  @protected
+  MensagemNaCaixa sse_decode_mensagem_na_caixa(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_gaveta = sse_decode_u_8(deserializer);
+    var var_lida = sse_decode_bool(deserializer);
+    return MensagemNaCaixa(gaveta: var_gaveta, lida: var_lida);
   }
 
   @protected
@@ -937,6 +1547,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_chegada_da_carta(
+    ChegadaDaCarta self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.tipo, serializer);
+    sse_encode_u_8(self.gaveta, serializer);
+    sse_encode_list_prim_u_8_strict(self.pedido, serializer);
+  }
+
+  @protected
   void sse_encode_contato_da_agenda(
     ContatoDaAgenda self,
     SseSerializer serializer,
@@ -974,6 +1595,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_mensagem_na_caixa(
+    List<MensagemNaCaixa> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_mensagem_na_caixa(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_u_8_loose(
     List<int> self,
     SseSerializer serializer,
@@ -993,6 +1626,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
+  }
+
+  @protected
+  void sse_encode_mensagem_lida(MensagemLida self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.remetente, serializer);
+    sse_encode_list_prim_u_8_strict(self.texto, serializer);
+  }
+
+  @protected
+  void sse_encode_mensagem_na_caixa(
+    MensagemNaCaixa self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_8(self.gaveta, serializer);
+    sse_encode_bool(self.lida, serializer);
   }
 
   @protected

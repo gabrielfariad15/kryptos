@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `erro`
+// These functions are ignored because they are not marked as `pub`: `codigo_de`, `erro_caixa`, `erro`
 
 /// Versão do núcleo compilado dentro do app.
 String versaoNucleo() => RustLib.instance.api.crateApiNucleoVersaoNucleo();
@@ -89,6 +89,111 @@ Future<ContatoLido?> adicionarContatoDoQuadro({
 List<ContatoDaAgenda> contatos() =>
     RustLib.instance.api.crateApiNucleoContatos();
 
+/// Texto do cartão deste aparelho (o mesmo que vai no QR), ou nada sem identidade.
+String? cartaoProprioTexto() =>
+    RustLib.instance.api.crateApiNucleoCartaoProprioTexto();
+
+/// Põe na agenda o contato de um cartão já lido em texto (mesmas recusas do QR).
+Future<ContatoLido> adicionarContatoPorTexto({required String texto}) =>
+    RustLib.instance.api.crateApiNucleoAdicionarContatoPorTexto(texto: texto);
+
+/// Chave avulsa nova, já gravada no cofre: 32 bytes de chave e 64 de assinatura, o
+/// mesmo formato da retirada no relay.
+Future<Uint8List> novaChaveAvulsa() =>
+    RustLib.instance.api.crateApiNucleoNovaChaveAvulsa();
+
+/// Abre a conversa com um contato da agenda, com a chave avulsa dele.
+Future<void> abrirConversa({
+  required String codigo,
+  required List<int> avulsa,
+}) => RustLib.instance.api.crateApiNucleoAbrirConversa(
+  codigo: codigo,
+  avulsa: avulsa,
+);
+
+/// Cifra o texto para o contato e devolve a carta, pronta para qualquer transporte.
+Future<Uint8List> cifrarCarta({
+  required String codigo,
+  required List<int> texto,
+}) => RustLib.instance.api.crateApiNucleoCifrarCarta(
+  codigo: codigo,
+  texto: texto,
+);
+
+Future<ChegadaDaCarta> caixaReceberCarta({required List<int> carta}) =>
+    RustLib.instance.api.crateApiNucleoCaixaReceberCarta(carta: carta);
+
+/// Sela a carta que esperava o HMAC. Devolve a gaveta.
+Future<int> caixaSelarChegada({required List<int> hmac}) =>
+    RustLib.instance.api.crateApiNucleoCaixaSelarChegada(hmac: hmac);
+
+Future<void> caixaDesistirDaChegada() =>
+    RustLib.instance.api.crateApiNucleoCaixaDesistirDaChegada();
+
+/// Mensagens não queimadas, na ordem de chegada.
+Future<List<MensagemNaCaixa>> caixaListar() =>
+    RustLib.instance.api.crateApiNucleoCaixaListar();
+
+/// Cartas que não abriram nesta execução do app.
+Future<int> caixaNaoAbertas() =>
+    RustLib.instance.api.crateApiNucleoCaixaNaoAbertas();
+
+Future<Uint8List> caixaPedidoDeLeitura({required int gaveta}) =>
+    RustLib.instance.api.crateApiNucleoCaixaPedidoDeLeitura(gaveta: gaveta);
+
+/// Abre a mensagem (marca como lida no disco antes). O texto vai para o Dart, que não
+/// garante apagar a cópia antes do coletor de lixo passar.
+Future<MensagemLida> caixaLer({required int gaveta, required List<int> hmac}) =>
+    RustLib.instance.api.crateApiNucleoCaixaLer(gaveta: gaveta, hmac: hmac);
+
+/// Gavetas queimadas agora (lidas há 60 s ou mais), para o Kotlin trocar a chave.
+Future<Uint8List> caixaQueimarVencidas() =>
+    RustLib.instance.api.crateApiNucleoCaixaQueimarVencidas();
+
+/// Gavetas queimadas agora (todas as lidas e as interrompidas), para trocar a chave.
+Future<Uint8List> caixaQueimarLidas() =>
+    RustLib.instance.api.crateApiNucleoCaixaQueimarLidas();
+
+Future<void> caixaChaveTrocada({required int gaveta}) =>
+    RustLib.instance.api.crateApiNucleoCaixaChaveTrocada(gaveta: gaveta);
+
+/// Contagens da busca de um texto (em 8 formas) em todos os arquivos da pasta. Para o
+/// teste no aparelho provar que o texto não ficou no disco. Nunca o conteúdo.
+Future<Varredura> procurarTexto({
+  required String pasta,
+  required List<int> texto,
+}) => RustLib.instance.api.crateApiNucleoProcurarTexto(
+  pasta: pasta,
+  texto: texto,
+);
+
+/// O que fazer com uma carta que chegou. `tipo`: SELAR (pedir o HMAC de `pedido` com a
+/// chave da `gaveta` e chamar `caixa_selar_chegada`), JA_GUARDADA, NAO_ABRE,
+/// NAO_E_PARA_MIM ou CAIXA_CHEIA. Fora de SELAR, `gaveta` é 0 e `pedido` vem vazio.
+class ChegadaDaCarta {
+  final String tipo;
+  final int gaveta;
+  final Uint8List pedido;
+
+  const ChegadaDaCarta({
+    required this.tipo,
+    required this.gaveta,
+    required this.pedido,
+  });
+
+  @override
+  int get hashCode => tipo.hashCode ^ gaveta.hashCode ^ pedido.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ChegadaDaCarta &&
+          runtimeType == other.runtimeType &&
+          tipo == other.tipo &&
+          gaveta == other.gaveta &&
+          pedido == other.pedido;
+}
+
 /// Um contato da agenda desta execução.
 class ContatoDaAgenda {
   final String codigo;
@@ -155,6 +260,44 @@ class GradeDoQr {
           lado == other.lado &&
           margem == other.margem &&
           modulos == other.modulos;
+}
+
+/// Mensagem aberta para a tela.
+class MensagemLida {
+  final String remetente;
+  final Uint8List texto;
+
+  const MensagemLida({required this.remetente, required this.texto});
+
+  @override
+  int get hashCode => remetente.hashCode ^ texto.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MensagemLida &&
+          runtimeType == other.runtimeType &&
+          remetente == other.remetente &&
+          texto == other.texto;
+}
+
+/// Uma mensagem na caixa, sem nada do conteúdo.
+class MensagemNaCaixa {
+  final int gaveta;
+  final bool lida;
+
+  const MensagemNaCaixa({required this.gaveta, required this.lida});
+
+  @override
+  int get hashCode => gaveta.hashCode ^ lida.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MensagemNaCaixa &&
+          runtimeType == other.runtimeType &&
+          gaveta == other.gaveta &&
+          lida == other.lida;
 }
 
 /// Sal novo e PIN esticado (Argon2id), para o HMAC do Keystore.

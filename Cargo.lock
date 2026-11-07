@@ -1031,6 +1031,7 @@ dependencies = [
 name = "kryptos_nucleo"
 version = "0.1.0"
 dependencies = [
+ "aho-corasick",
  "argon2",
  "base64",
  "chacha20poly1305",
@@ -1053,6 +1054,7 @@ dependencies = [
  "anyhow",
  "flutter_rust_bridge",
  "kryptos_nucleo",
+ "sha2",
  "zeroize",
 ]
 

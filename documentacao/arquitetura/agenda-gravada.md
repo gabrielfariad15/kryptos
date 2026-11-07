@@ -113,6 +113,11 @@ O mesmo valor sai do oráculo `ferramentas/oraculos/agenda.py`, que não usa o R
 - **Coação:** quem obrigar você a desbloquear o app vê a agenda.
 - **A agenda é o mapa de com quem você fala.** Cifrada e sem datas, mas existe. Senha de pânico é outra etapa.
 - **Resto no armazenamento:** a troca de nome deixa a versão anterior do arquivo em blocos livres do armazenamento, até serem reaproveitados. Sem a chave do Keystore ela não abre, e o "apagar tudo" apaga essa chave (Kotlin). Apagar a chave a cada gravação não está feito.
-- **Transferência entre aparelhos (Android 12+):** `android:allowBackup="false"` não impede a transferência direta de um aparelho para outro. A pasta `noBackupFilesDir` fica fora do backup automático, e as chaves do Keystore não saem do aparelho, então o que fosse copiado não abriria. Isso não foi medido no aparelho. Uma regra de extração (`dataExtractionRules`) que exclua tudo entra na próxima etapa do app, como segunda barreira.
+- **Transferência entre aparelhos (Android 12+):** `android:allowBackup="false"` não impede a transferência direta de um aparelho para outro. Três barreiras:
+  - a pasta `noBackupFilesDir` fica fora do backup automático;
+  - as chaves do Keystore não saem do aparelho, então o que fosse copiado não abriria;
+  - desde a etapa da caixa, `res/xml/regras_de_extracao.xml` exclui todos os domínios da nuvem e da transferência direta.
+
+  Uma transferência real entre dois aparelhos não foi testada.
 - **Agenda corrompida trava a abertura.** A tela mostra `AGENDA_CORROMPIDA`, mas ainda não há saída para recomeçar só com a agenda vazia. A decisão fica para o "apagar tudo", junto do `CHAVE_AUSENTE`.
 - **Apelido:** o lugar existe, mas a tela ainda não.

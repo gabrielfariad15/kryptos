@@ -11,11 +11,14 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
     <!-- Sem backup: o cofre da identidade fica em noBackupFilesDir e nada do app vai
-         para backup em nuvem ou adb (cofre-da-identidade.md). -->
+         para backup em nuvem ou adb (cofre-da-identidade.md). No Android 12+ o
+         allowBackup="false" nao barra a transferencia direta entre aparelhos: as regras
+         de extracao excluem tudo dela tambem (agenda-gravada.md). -->
     <application
         android:label="Kryptos"
         android:name="${applicationName}"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/regras_de_extracao"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

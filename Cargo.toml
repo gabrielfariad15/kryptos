@@ -30,6 +30,9 @@ hkdf = "0.13.0"
 # Ja vinha pelo vodozemac (hpke); exata como a outra criptografia. Sem os padroes: o
 # nonce vem do getrandom do proprio nucleo, nao do recurso getrandom do aead.
 chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
+# Varredura do disco: todas as formas dos segredos numa passada so por arquivo.
+# Ja vinha pelo rxing (regex).
+aho-corasick = "1.1.5"
 zeroize = "1.9.1"
 getrandom = "0.4.3"
 serde = { version = "1.0.229", features = ["derive"] }

@@ -8,7 +8,7 @@ use std::path::Path;
 use kryptos_nucleo::aparelho;
 use kryptos_nucleo::cofre::ErroCofre;
 use kryptos_nucleo::qr;
-use kryptos_nucleo::{Adicao, Conferencia};
+use kryptos_nucleo::{Adicao, ChaveAvulsa, CodigoContato, Conferencia};
 use zeroize::Zeroizing;
 
 fn erro(e: ErroCofre) -> anyhow::Error {
@@ -198,6 +198,173 @@ pub fn contatos() -> Vec<ContatoDaAgenda> {
         .collect()
 }
 
+// ---------- Conversa e caixa selada (documentacao/arquitetura/caixa-selada.md) ----------
+//
+// Atravessam a ponte: o cartão próprio (público, é o que vai no QR), a chave avulsa
+// pública, cartas cifradas, pedidos e respostas do HMAC do Keystore e, só em
+// `caixa_ler`, o texto que a pessoa mandou abrir. Erro chega como o código fixo do
+// núcleo.
+
+fn codigo_de(texto: &str) -> anyhow::Result<CodigoContato> {
+    CodigoContato::ler(texto).map_err(|e| anyhow::anyhow!(e.to_string()))
+}
+
+/// Texto do cartão deste aparelho (o mesmo que vai no QR), ou nada sem identidade.
+#[flutter_rust_bridge::frb(sync)]
+pub fn cartao_proprio_texto() -> Option<String> {
+    aparelho::cartao_proprio().map(|c| c.como_texto())
+}
+
+/// Põe na agenda o contato de um cartão já lido em texto (mesmas recusas do QR).
+pub fn adicionar_contato_por_texto(texto: String) -> anyhow::Result<ContatoLido> {
+    let adicao =
+        aparelho::adicionar_contato_por_qr(&texto).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    Ok(match adicao {
+        Adicao::Novo(c) => ContatoLido {
+            codigo: c.como_texto(),
+            novo: true,
+        },
+        Adicao::JaEstava(c) => ContatoLido {
+            codigo: c.como_texto(),
+            novo: false,
+        },
+    })
+}
+
+/// Chave avulsa nova, já gravada no cofre: 32 bytes de chave e 64 de assinatura, o
+/// mesmo formato da retirada no relay.
+pub fn nova_chave_avulsa() -> anyhow::Result<Vec<u8>> {
+    let a = aparelho::nova_chave_avulsa().map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    Ok([a.chave_bytes().as_slice(), a.assinatura_bytes().as_slice()].concat())
+}
+
+/// Abre a conversa com um contato da agenda, com a chave avulsa dele.
+pub fn abrir_conversa(codigo: String, avulsa: Vec<u8>) -> anyhow::Result<()> {
+    let avulsa = ChaveAvulsa::da_retirada(&avulsa).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    aparelho::abrir_conversa(codigo_de(&codigo)?, &avulsa)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+}
+
+/// Cifra o texto para o contato e devolve a carta, pronta para qualquer transporte.
+pub fn cifrar_carta(codigo: String, texto: Vec<u8>) -> anyhow::Result<Vec<u8>> {
+    let texto = Zeroizing::new(texto);
+    aparelho::cifrar_carta(codigo_de(&codigo)?, &texto).map_err(|e| anyhow::anyhow!(e.to_string()))
+}
+
+fn erro_caixa(e: aparelho::ErroCaixa) -> anyhow::Error {
+    anyhow::anyhow!(e.to_string())
+}
+
+/// O que fazer com uma carta que chegou. `tipo`: SELAR (pedir o HMAC de `pedido` com a
+/// chave da `gaveta` e chamar `caixa_selar_chegada`), JA_GUARDADA, NAO_ABRE,
+/// NAO_E_PARA_MIM ou CAIXA_CHEIA. Fora de SELAR, `gaveta` é 0 e `pedido` vem vazio.
+pub struct ChegadaDaCarta {
+    pub tipo: String,
+    pub gaveta: u8,
+    pub pedido: Vec<u8>,
+}
+
+pub fn caixa_receber_carta(carta: Vec<u8>) -> anyhow::Result<ChegadaDaCarta> {
+    let simples = |tipo: &str| ChegadaDaCarta {
+        tipo: tipo.to_string(),
+        gaveta: 0,
+        pedido: Vec::new(),
+    };
+    Ok(match aparelho::receber_carta(&carta).map_err(erro_caixa)? {
+        aparelho::Chegada::Selar { gaveta, pedido } => ChegadaDaCarta {
+            tipo: "SELAR".to_string(),
+            gaveta,
+            pedido: pedido.to_vec(),
+        },
+        aparelho::Chegada::JaGuardada => simples("JA_GUARDADA"),
+        aparelho::Chegada::NaoAbre => simples("NAO_ABRE"),
+        aparelho::Chegada::NaoEParaMim => simples("NAO_E_PARA_MIM"),
+        aparelho::Chegada::CaixaCheia => simples("CAIXA_CHEIA"),
+    })
+}
+
+/// Sela a carta que esperava o HMAC. Devolve a gaveta.
+pub fn caixa_selar_chegada(hmac: Vec<u8>) -> anyhow::Result<u8> {
+    let hmac = Zeroizing::new(hmac);
+    aparelho::selar_chegada(&hmac).map_err(erro_caixa)
+}
+
+pub fn caixa_desistir_da_chegada() -> anyhow::Result<()> {
+    aparelho::desistir_da_chegada().map_err(erro_caixa)
+}
+
+/// Uma mensagem na caixa, sem nada do conteúdo.
+pub struct MensagemNaCaixa {
+    pub gaveta: u8,
+    pub lida: bool,
+}
+
+/// Mensagens não queimadas, na ordem de chegada.
+pub fn caixa_listar() -> anyhow::Result<Vec<MensagemNaCaixa>> {
+    Ok(aparelho::caixa()
+        .map_err(erro_caixa)?
+        .into_iter()
+        .map(|i| MensagemNaCaixa {
+            gaveta: i.gaveta,
+            lida: i.lida,
+        })
+        .collect())
+}
+
+/// Cartas que não abriram nesta execução do app.
+pub fn caixa_nao_abertas() -> anyhow::Result<u32> {
+    aparelho::nao_abertas().map_err(erro_caixa)
+}
+
+pub fn caixa_pedido_de_leitura(gaveta: u8) -> anyhow::Result<Vec<u8>> {
+    Ok(aparelho::pedido_de_leitura(gaveta)
+        .map_err(erro_caixa)?
+        .to_vec())
+}
+
+/// Mensagem aberta para a tela.
+pub struct MensagemLida {
+    pub remetente: String,
+    pub texto: Vec<u8>,
+}
+
+/// Abre a mensagem (marca como lida no disco antes). O texto vai para o Dart, que não
+/// garante apagar a cópia antes do coletor de lixo passar.
+pub fn caixa_ler(gaveta: u8, hmac: Vec<u8>) -> anyhow::Result<MensagemLida> {
+    let hmac = Zeroizing::new(hmac);
+    let lida = aparelho::ler(gaveta, &hmac).map_err(erro_caixa)?;
+    Ok(MensagemLida {
+        remetente: lida.remetente.como_texto(),
+        texto: lida.texto.to_vec(),
+    })
+}
+
+/// Gavetas queimadas agora (lidas há 60 s ou mais), para o Kotlin trocar a chave.
+pub fn caixa_queimar_vencidas() -> anyhow::Result<Vec<u8>> {
+    aparelho::queimar_vencidas().map_err(erro_caixa)
+}
+
+/// Gavetas queimadas agora (todas as lidas e as interrompidas), para trocar a chave.
+pub fn caixa_queimar_lidas() -> anyhow::Result<Vec<u8>> {
+    aparelho::queimar_lidas().map_err(erro_caixa)
+}
+
+pub fn caixa_chave_trocada(gaveta: u8) -> anyhow::Result<()> {
+    aparelho::chave_trocada(gaveta).map_err(erro_caixa)
+}
+
+/// Contagens da busca de um texto (em 8 formas) em todos os arquivos da pasta. Para o
+/// teste no aparelho provar que o texto não ficou no disco. Nunca o conteúdo.
+pub fn procurar_texto(pasta: String, texto: Vec<u8>) -> anyhow::Result<Varredura> {
+    let v = kryptos_nucleo::cofre::procurar(Path::new(&pasta), &[Zeroizing::new(texto)])
+        .map_err(erro)?;
+    Ok(Varredura {
+        arquivos: v.arquivos,
+        ocorrencias: v.ocorrencias,
+        ilegiveis: v.ilegiveis,
+    })
+}
+
 #[flutter_rust_bridge::frb(init)]
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
@@ -233,9 +400,19 @@ mod testes {
         }
     }
 
-    // Um teste só: o estado do aparelho é global e os testes do cargo rodam em paralelo.
+    /// O estado do aparelho é global e os testes do cargo rodam em paralelo: quem mexe
+    /// nele pega esta trava.
+    static SERIE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn em_serie() -> std::sync::MutexGuard<'static, ()> {
+        SERIE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[test]
     fn grade_quadro_e_agenda_pela_ponte() -> anyhow::Result<()> {
+        let _serie = em_serie();
         esquecer_identidade();
         assert!(grade_propria()?.is_none(), "grade sem identidade");
 
@@ -287,5 +464,98 @@ mod testes {
         esquecer_identidade();
         assert!(contatos().is_empty());
         Ok(())
+    }
+
+    /// Faz o papel do Keystore: SHA-256 de um nome de chave e dos dados.
+    fn keystore_falso(chave: &str, dados: &[u8]) -> Vec<u8> {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(chave.as_bytes());
+        h.update(dados);
+        h.finalize().to_vec()
+    }
+
+    fn abrir_cofre_pela_ponte(pasta: &str) -> anyhow::Result<String> {
+        let esticado = cofre_preparar_abertura(pasta.to_string(), b"246801".to_vec())?;
+        cofre_abrir(pasta.to_string(), keystore_falso("cofre", &esticado))
+    }
+
+    /// O caminho que o teste no aparelho faz, sem o celular: B cria o cofre e publica
+    /// uma chave avulsa; A abre a conversa e manda duas cartas; B recebe, sela, lê e
+    /// queima. O texto não fica no disco.
+    #[test]
+    fn caixa_pela_ponte() -> anyhow::Result<()> {
+        let _serie = em_serie();
+        let pasta_b =
+            std::env::temp_dir().join(format!("kryptos-ponte-caixa-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta_b);
+        std::fs::create_dir_all(&pasta_b)?;
+        let pasta = pasta_b.to_string_lossy().to_string();
+        let r = (|| -> anyhow::Result<()> {
+            // B
+            esquecer_identidade();
+            gerar_codigo_contato();
+            let p = cofre_preparar_pin_novo(b"246801".to_vec())?;
+            cofre_criar(pasta.clone(), p.sal, keystore_falso("cofre", &p.esticado))?;
+            let cartao_b = cartao_proprio_texto().ok_or_else(|| anyhow::anyhow!("sem cartão"))?;
+            let avulsa = nova_chave_avulsa()?;
+            assert_eq!(avulsa.len(), 96);
+
+            // A, sem cofre
+            esquecer_identidade();
+            gerar_codigo_contato();
+            let b = adicionar_contato_por_texto(cartao_b)?;
+            abrir_conversa(b.codigo.clone(), avulsa)?;
+            let texto = "MENSAGEM-PELA-PONTE-ação".as_bytes().to_vec();
+            let carta = cifrar_carta(b.codigo.clone(), texto.clone())?;
+            let cartao_a = cartao_proprio_texto().ok_or_else(|| anyhow::anyhow!("sem cartão"))?;
+            let codigo_a = codigo_atual().ok_or_else(|| anyhow::anyhow!("sem código"))?;
+            esquecer_identidade();
+
+            // B de novo
+            abrir_cofre_pela_ponte(&pasta)?;
+            adicionar_contato_por_texto(cartao_a)?;
+            assert!(caixa_queimar_lidas()?.is_empty());
+            let c = caixa_receber_carta(carta.clone())?;
+            assert_eq!(c.tipo, "SELAR");
+            assert_eq!(c.pedido.len(), 42);
+            let gaveta =
+                caixa_selar_chegada(keystore_falso(&format!("gaveta {}", c.gaveta), &c.pedido))?;
+            assert_eq!(gaveta, c.gaveta);
+            assert_eq!(caixa_receber_carta(carta.clone())?.tipo, "JA_GUARDADA");
+            let mut outra = carta.clone();
+            outra[1] ^= 1;
+            assert_eq!(caixa_receber_carta(outra)?.tipo, "NAO_E_PARA_MIM");
+            let erro = match caixa_receber_carta(vec![1, 2, 3]) {
+                Err(e) => e.to_string(),
+                Ok(_) => "sem erro".to_string(),
+            };
+            assert!(erro.starts_with("PROTOCOLO_"), "erro {erro}");
+
+            let lista = caixa_listar()?;
+            assert_eq!(lista.len(), 1);
+            assert!(!lista[0].lida);
+            assert_eq!(procurar_texto(pasta.clone(), texto.clone())?.ocorrencias, 0);
+
+            let pedido = caixa_pedido_de_leitura(gaveta)?;
+            let lida = caixa_ler(gaveta, keystore_falso(&format!("gaveta {gaveta}"), &pedido))?;
+            assert_eq!(lida.remetente, codigo_a);
+            assert_eq!(lida.texto, texto);
+            assert!(caixa_listar()?[0].lida);
+
+            assert_eq!(caixa_queimar_lidas()?, vec![gaveta]);
+            caixa_chave_trocada(gaveta)?;
+            assert!(caixa_listar()?.is_empty());
+            assert_eq!(caixa_nao_abertas()?, 0);
+            let v = procurar_texto(pasta.clone(), texto.clone())?;
+            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (104, 0, 0));
+            // calibração: em claro, a busca acha
+            std::fs::write(pasta_b.join("vazamento"), &texto)?;
+            assert!(procurar_texto(pasta.clone(), texto)?.ocorrencias >= 1);
+            Ok(())
+        })();
+        esquecer_identidade();
+        std::fs::remove_dir_all(&pasta_b)?;
+        r
     }
 }

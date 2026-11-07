@@ -16,6 +16,10 @@ kryptos_nucleo.workspace = true
 anyhow.workspace = true
 zeroize.workspace = true
 
+# So nos testes da ponte: o Keystore falso (ja vinha pelo nucleo).
+[dev-dependencies]
+sha2.workspace = true
+
 # Sem os lints do workspace: o frb_generated.rs e codigo gerado.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

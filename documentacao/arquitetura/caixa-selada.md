@@ -39,7 +39,9 @@ Leitura estrita: estado desconhecido, gaveta sem carta com número ou resumo, n�
 
 ## Chaves no Keystore
 
-Uma chave HMAC por gaveta, 100 ao todo, que existem sempre (parte do Kotlin, próxima etapa). Queimar uma gaveta é sobrescrevê-la com bytes aleatórios e trocar a chave dela no hardware: apagar e criar outra. O número de chaves não muda, então o Keystore também não diz quantas mensagens há.
+Uma chave HMAC por gaveta, 100 ao todo, que existem sempre: alias `kryptos-gaveta-00` a `kryptos-gaveta-99`. O Kotlin é o mesmo do cofre (`ChaveDoAparelho.kt`): `criar` apaga a chave do alias, se houver, e gera outra, tentando o StrongBox e caindo no TEE. O app (`caixa_do_aparelho.dart`) cria as que faltam ao abrir (`prepararChaves`).
+
+Queimar uma gaveta é sobrescrevê-la com bytes aleatórios e trocar a chave dela no hardware, com `criar` no mesmo alias. O número de chaves não muda, então o Keystore também não diz quantas mensagens há.
 
 ## Etapas
 
@@ -75,6 +77,21 @@ Só então o app confirma ao relay. Se algo falhar, a carta continua esperando: 
   3. o Kotlin troca a chave;
   4. `chave_trocada` libera a gaveta.
 - App morto no meio do minuto: ao abrir, a lida queima na hora.
+
+## Ponte e aparelho
+
+- **Ponte** (`frontend/app/rust/src/api/nucleo.rs`):
+  - `caixa_receber_carta`, `caixa_selar_chegada`, `caixa_desistir_da_chegada`;
+  - `caixa_listar`, `caixa_nao_abertas`, `caixa_pedido_de_leitura`, `caixa_ler`;
+  - `caixa_queimar_vencidas`, `caixa_queimar_lidas`, `caixa_chave_trocada`.
+  - Para enviar: `cartao_proprio_texto`, `adicionar_contato_por_texto`, `nova_chave_avulsa`, `abrir_conversa` e `cifrar_carta`.
+  - `procurar_texto` só devolve contagens, para o teste provar que o texto não ficou no disco.
+- **Dart** (`lib/caixa_do_aparelho.dart`): faz o vai-e-volta do HMAC com o Keystore e troca a chave depois de cada queima. Se o Keystore ou o disco falharem na selagem, desiste da carta e a falha sobe.
+- **No aparelho** (`integration_test/caixa_test.dart`): num celular só, B cria o cofre e as 100 chaves; A, outra identidade, cifra uma carta; B recebe, sela, lê e queima.
+  - O texto é procurado em toda a pasta do app antes de ler e depois de queimar.
+  - A busca é calibrada no próprio aparelho, gravando o texto em claro.
+  - A linha MEDIDA traz os tempos de criar o cofre, criar as chaves, gravar a agenda, selar, ler, queimar e buscar.
+- **Ponte, sem o celular:** o mesmo caminho no teste Rust `caixa_pela_ponte`, com um Keystore falso.
 
 ## Vetores conhecidos
 
@@ -121,8 +138,8 @@ Os mesmos valores saem do oráculo `ferramentas/oraculos/caixa.py`, sem o Rust. 
 ## O que não resolve
 
 - **O texto passa pela memória e pela tela.** Quem lê a memória do app (root, depurador) vê o texto enquanto ele está aberto. O Dart não garante que as cópias sumiram antes do coletor de lixo passar.
-- **Chave do Keystore restaurada:** se o atacante já tinha uma cópia dos arquivos do Keystore antes da queima, só aparelho com *rollback resistance* impede que ele a use de novo. Ainda não conferi se a API pública deixa pedir isso, nem se o Motorola tem.
+- **Chave do Keystore restaurada:** se o atacante já tinha root e uma cópia dos arquivos do Keystore antes da queima, ele pode restaurar a chave apagada e abrir a cópia antiga da gaveta. Só a *rollback resistance* impede isso, e o Android a esconde dos apps: o espaço dela fica reservado para chaves do sistema (`KeyProtection.Builder.setRollbackResistant` é `@hide`, conferido no código do AOSP em 07/11/2026). Nenhum app comum tem essa garantia, em aparelho nenhum.
 - **Índice antigo no armazenamento:** a troca de nome deixa versões antigas do índice em blocos livres. Com a chave do cofre (PIN + Keystore), elas mostram quantas mensagens havia e em que estado, nunca o texto nem o remetente.
 - **App morto entre decifrar e reservar a gaveta:** a carta se perde. A conversa já andou, e o relay, se entregar de novo, recebe `NaoAbre`.
 - **Gaveta apagada à mão:** a leitura dela falha, e a queima a recria. O índice não confere a existência das gavetas ao abrir.
-- **Ainda não feito:** a ponte para o Dart, o Kotlin das 100 chaves e a tela. São a próxima etapa, junto da medição no Motorola: criar as 100 chaves, selar, ler e queimar, e o tempo de gravação da agenda e da gaveta.
+- **Ainda não feito:** a tela da caixa e a queima ligada ao ciclo de vida do app (a cada segundo, ao sair e ao apagar a tela). `CaixaDoAparelho` já tem as chamadas; falta a tela que as faz.
