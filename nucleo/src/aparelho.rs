@@ -1,5 +1,5 @@
-//! Estado do aparelho na memória: a identidade desta execução do app, e as etapas do
-//! cofre que o app chama pela ponte.
+//! Estado do aparelho na memória: a identidade desta execução do app, a agenda de
+//! contatos e as etapas do cofre que o app chama pela ponte.
 //!
 //! Fica no núcleo para a chave nunca atravessar a ponte: o app recebe o código de
 //! contato e, no cofre, só o PIN esticado e a chave do Keystore passam por ele.
@@ -8,6 +8,11 @@
 //!   `gerar_identidade` → `preparar_pin_novo` → HMAC no Keystore → `criar_cofre`
 //! Abrir (aberturas seguintes):
 //!   `preparar_abertura` → HMAC no Keystore → `abrir_cofre`
+//! Contatos (só em memória):
+//!   `cartao_proprio` para mostrar o QR; `adicionar_contato_por_qr` com o texto lido.
+//!
+//! Ordem das travas: a da identidade é solta antes de pegar a da agenda. Nenhuma
+//! função segura as duas ao mesmo tempo, então não há como travar uma na outra.
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -16,17 +21,25 @@ use std::time::Duration;
 
 use zeroize::Zeroizing;
 
+use crate::cartao::CartaoContato;
 use crate::codigo::CodigoContato;
 use crate::cofre::{self, Custo, ErroCofre, Resultado, TAMANHO_CHAVE, TAMANHO_SAL, Varredura};
+use crate::contatos::{Adicao, Agenda, Contato, ErroAgenda};
 use crate::identidade::Identidade;
 
 static IDENTIDADE: Mutex<Option<Identidade>> = Mutex::new(None);
+static AGENDA: Mutex<Agenda> = Mutex::new(Agenda::nova());
 
 fn trava() -> MutexGuard<'static, Option<Identidade>> {
     // Trava envenenada quer dizer que outra thread entrou em pânico segurando-a. O valor
     // guardado continua inteiro, porque toda escrita troca o valor de uma vez. Por isso
     // seguimos com ele em vez de derrubar o app.
     IDENTIDADE.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn trava_agenda() -> MutexGuard<'static, Agenda> {
+    // Mesmo raciocínio: a agenda só muda por um `push` ou um `clear` inteiros.
+    AGENDA.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Gera a identidade do aparelho na primeira chamada e devolve o código de contato.
@@ -42,10 +55,32 @@ pub fn codigo_atual() -> Option<CodigoContato> {
     trava().as_ref().map(Identidade::codigo_contato)
 }
 
-/// Tira a identidade da memória (a conta do vodozemac zera as chaves ao sair).
+/// Tira a identidade e a agenda da memória (a conta do vodozemac zera as chaves ao sair).
 /// É o que acontece quando o app fecha; o teste no aparelho usa para simular a reabertura.
 pub fn esquecer() {
     *trava() = None;
+    trava_agenda().limpar();
+}
+
+/// Cartão deste aparelho, para desenhar o QR. `None` sem identidade na memória.
+pub fn cartao_proprio() -> Option<CartaoContato> {
+    trava()
+        .as_ref()
+        .map(|i| CartaoContato::de_chaves(&i.chaves_publicas()))
+}
+
+/// Põe na agenda o contato do texto lido no QR, conferido por QR.
+pub fn adicionar_contato_por_qr(texto: &str) -> Result<Adicao, ErroAgenda> {
+    let proprio = trava()
+        .as_ref()
+        .map(Identidade::chaves_publicas)
+        .ok_or(ErroAgenda::SemIdentidade)?;
+    trava_agenda().adicionar_por_qr(texto, &proprio)
+}
+
+/// Cópia da agenda, na ordem em que os contatos entraram.
+pub fn contatos() -> Vec<Contato> {
+    trava_agenda().contatos().to_vec()
 }
 
 /// Sal novo e PIN esticado, para o Kotlin passar no HMAC do Keystore.
@@ -128,6 +163,8 @@ pub fn abrir_cofre(pasta: &Path, chave_do_cofre: &[u8]) -> Resultado<CodigoConta
     cofre::gravar_tentativas(pasta, 0)?;
     let codigo = identidade.codigo_contato();
     *trava() = Some(identidade);
+    // A agenda foi conferida contra a identidade anterior: começa vazia com a aberta.
+    trava_agenda().limpar();
     Ok(codigo)
 }
 
@@ -165,9 +202,17 @@ mod testes {
         h.finalize().to_vec()
     }
 
-    // Único teste que toca o estado global, para não disputar com outros em paralelo.
+    /// Os testes que tocam o estado global (identidade e agenda) pegam esta trava,
+    /// para não disputarem entre si quando o `cargo test` roda em paralelo.
+    static SERIE: Mutex<()> = Mutex::new(());
+
+    fn em_serie() -> MutexGuard<'static, ()> {
+        SERIE.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     #[test]
     fn ciclo_completo_criar_esquecer_errar_abrir() -> Result<(), Box<dyn std::error::Error>> {
+        let _serie = em_serie();
         let pasta = std::env::temp_dir().join(format!("kryptos-aparelho-{}", std::process::id()));
         let _ = fs::remove_dir_all(&pasta);
         fs::create_dir_all(&pasta)?;
@@ -242,11 +287,61 @@ mod testes {
             abrir_cofre(&pasta, &keystore_falso(e.as_ref()))?;
             let v = procurar_segredos(&pasta)?;
             assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (2, 0, 0));
+
+            // abrir o cofre de novo começa com a agenda vazia
+            let outro = Identidade::nova().chaves_publicas();
+            adicionar_contato_por_qr(&CartaoContato::de_chaves(&outro).como_texto())?;
+            assert_eq!(contatos().len(), 1);
+            let e = preparar_abertura_com(&pasta, b"135790", dormir)?;
+            abrir_cofre(&pasta, &keystore_falso(e.as_ref()))?;
+            assert!(contatos().is_empty(), "agenda sobreviveu à abertura");
             esquecer();
             Ok(())
         })();
         fs::remove_dir_all(&pasta)?;
         r
+    }
+
+    #[test]
+    fn agenda_segue_a_identidade_da_memoria() -> Result<(), ErroAgenda> {
+        let _serie = em_serie();
+        esquecer();
+        let outro = Identidade::nova();
+        let texto = CartaoContato::de_chaves(&outro.chaves_publicas()).como_texto();
+
+        // sem identidade: não há QR próprio e nada entra
+        assert!(cartao_proprio().is_none());
+        assert_eq!(
+            adicionar_contato_por_qr(&texto),
+            Err(ErroAgenda::SemIdentidade)
+        );
+        assert!(contatos().is_empty());
+
+        // com identidade: o QR próprio é o da identidade e é recusado como contato
+        let meu_codigo = gerar_identidade();
+        let meu = cartao_proprio().ok_or(ErroAgenda::SemIdentidade)?;
+        assert_eq!(meu.codigo(), meu_codigo);
+        assert_eq!(
+            adicionar_contato_por_qr(&meu.como_texto()),
+            Err(ErroAgenda::Proprio)
+        );
+
+        // o QR do outro entra uma vez só
+        assert_eq!(
+            adicionar_contato_por_qr(&texto)?,
+            Adicao::Novo(outro.codigo_contato())
+        );
+        assert_eq!(
+            adicionar_contato_por_qr(&texto)?,
+            Adicao::JaEstava(outro.codigo_contato())
+        );
+        assert_eq!(contatos().len(), 1);
+
+        // "fechar o app" apaga a agenda junto com a identidade
+        esquecer();
+        assert!(contatos().is_empty());
+        assert!(cartao_proprio().is_none());
+        Ok(())
     }
 
     #[test]

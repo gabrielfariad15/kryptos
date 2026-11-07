@@ -54,9 +54,26 @@ Calculado por `ferramentas/oraculos/cartao.py`, só com a biblioteca padrão do 
 - Adulteração: cada caractere depois do prefixo, trocado por cada um dos outros 31 símbolos, é recusado. São 3.441 casos: 3.413 por `QR_NAO_CONFERE` e 28 por `QR_FORMATO`, todos no último caractere das chaves, onde a troca mexe no enchimento.
 - Calibração dos testes (07/11/2026): quatro sabotagens no código foram pegas, uma por vez. Sem a conferência do enchimento, falharam 2 testes; sem a conferência do código, 2; aceitando chave Ed25519 inválida, 1; com o `Debug` mostrando o texto, 1.
 
+## Agenda (nucleo/src/contatos.rs)
+
+O cartão lido entra na agenda desta execução do app, conferido por QR. A agenda fica só em memória: some quando o app fecha e também quando o cofre é aberto de novo. Guardar em disco, cifrado, é assunto próprio.
+
+| Código | Quando |
+|---|---|
+| `QR_PROPRIO` | O QR é o deste aparelho |
+| `QR_CONFLITO` | Chaves diferentes de alguém da agenda, ou deste aparelho, mas com o mesmo código de contato ou com uma das duas chaves igual |
+| `SEM_IDENTIDADE` | Não há identidade na memória para comparar |
+
+Ler de novo o QR de quem já está na agenda não duplica o contato: a resposta é "já estava".
+
+Mesmo código com outra chave nunca é tratado como o mesmo contato. O código tem 35 bits, e gerar uma chave com o código de outra pessoa custa horas de computador (estimo, sem medir). A agenda compara as chaves inteiras e avisa como possível imitação.
+
+Calibração dos testes (07/11/2026): seis sabotagens, uma por vez, e cada uma derrubou pelo menos um teste. Foram tirados: a recusa do próprio QR, o conflito por código, o conflito com o próprio aparelho, o "já estava", a limpeza da agenda ao esquecer e a limpeza ao abrir o cofre. Os testes que mexem no estado global rodam em série; 20 rodadas seguidas deram 20 verdes.
+
 ## O que não resolve
 
 - **Chave Curve25519 de ordem baixa não é recusada na leitura.** Quem recusa é o vodozemac, ao abrir a sessão (`SessionCreationError::NonContributoryKey`, conferido no código da 0.11.2). Fica para o assunto da conversa provar com teste.
 - **Quem mostra o QR pode mostrar a chave de outra pessoa.** Ela não ganha nada com isso, porque não tem a chave secreta, mas o contato fica com o nome errado. A leitura pessoal prova "esta é a chave que este aparelho mostra", não "este aparelho é desta pessoa".
 - **Aparelho comprometido** mostra a chave que o atacante quiser.
+- **Agenda em memória:** fechar o app perde os contatos, e eles precisam ser lidos de novo.
 - **Print da tela:** o QR é a chave pública, não é segredo, mas quem fotografar a tela ganha o contato. O `FLAG_SECURE` ainda não está no app (a captura do G15 de 07/11/2026 saiu normal).
