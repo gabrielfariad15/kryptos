@@ -96,6 +96,13 @@ try {
         (@($escolhidos | ForEach-Object { "$($_.Modelo), Android $($_.Android)" }) -join ' | ')
     }
 
+    # ---------- Rust: o Cargokit compila com a stable, que tem de ser a do rust-toolchain.toml ----------
+    Passo 'versao do Rust' {
+        $ps = (Get-Process -Id $PID).Path
+        $t = Rodar $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'conferir-rust.ps1'), '-Raiz', $Repo)
+        if ($t -match 'OK\s+versao do Rust: (\S+)') { "$($Matches[1]) na suite e no celular" }
+    }
+
     # ---------- compilar uma vez ----------
     $apk = Join-Path $app 'build\app\outputs\flutter-apk\app-debug.apk'
     Passo 'compilar APK de debug (arm64)' {

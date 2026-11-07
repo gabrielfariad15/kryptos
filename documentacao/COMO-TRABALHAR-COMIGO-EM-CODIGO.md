@@ -48,7 +48,7 @@ Tarefa pequena não precisa de cerimônia. Uma pergunta direta recebe uma respos
 
 1. Comando que vai se repetir vira script em `ferramentas/`, rodado por uma linha. Script novo parte do `ferramentas/modelo.ps1`.
 2. Os fatos da máquina ficam em `ferramentas/ambiente.json`, fora do git. Desktop e notebook têm usuários diferentes.
-3. Bloco para colar no terminal **para no primeiro erro**, nunca segue em frente. (Lição de 06/11/2026: um bloco continuou depois de um arquivo que faltava.)
+3. Bloco para colar no terminal **para no primeiro erro**, nunca segue em frente. Ele vai inteiro dentro de `& { ... }`: colado solto, o console roda cada linha por conta própria, e o `throw` de uma linha não impede a seguinte. (Lições de 06/11/2026: um bloco continuou depois de um arquivo que faltava. De 07/11/2026: depois de `SUITE FALHOU`, a linha seguinte ainda imprimiu `RESULTADO: OK`.)
 4. Tudo o que pode ir junto vai num bloco só, encadeado pelo resultado: simular, aplicar, rodar a suíte.
 5. Limpeza (temporário, variável de ambiente, banco de teste) fica no mesmo bloco que sujou, no `finally`.
 6. Do resultado, colar só as linhas de saída (`OK`, `FALHA`, `RESULTADO`), não o comando de volta.
@@ -62,6 +62,7 @@ Tarefa pequena não precisa de cerimônia. Uma pergunta direta recebe uma respos
 3. Ferramenta de verificação é calibrada contra casos certos e errados antes de valer. Isenção tem motivo escrito.
 4. Conferir também o que **deveria existir e não existe**, e o que se aponta olhando a tela uma vez.
 5. Funcionalidade visível só conta como pronta depois de vista funcionando no aparelho.
+6. A versão do Rust é a do `rust-toolchain.toml`. O app do celular compila com a `stable` do rustup (o Cargokit não lê esse arquivo), e a suíte confere que as duas são a mesma. Versão nova é decisão: subir o arquivo e rodar a suíte nas duas máquinas.
 
 
 ## 6. Git
@@ -133,11 +134,12 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 | `ferramentas/modelo.ps1` | Base de script novo: para no erro, limpa no final, imprime só o resultado |
 | `ferramentas/diagnostico-ambiente.ps1` | Confere, sem alterar nada, se a máquina tem Rust, Flutter, SDK/NDK do Android, gerador da ponte e o celular no cabo |
 | `ferramentas/instalar-ferramentas.ps1` | Instala o que o diagnóstico apontou, com versões fixas, e grava os caminhos no `ambiente.json` |
-| `ferramentas/suite.ps1` | Suíte antes de commit: fmt, clippy, testes Rust, análise e testes do Flutter; com `-Aparelho`, os testes da ponte, do cofre e do QR no celular, com as medidas; com mais de um celular, `-Todos` ou `-Serial` |
-| `ferramentas/instalar-no-celular.ps1` | Compila uma vez, instala, confere as permissões do app instalado (câmera sim, microfone e armazenamento não), abre o app, confere o logcat, informa tamanho e densidade da tela e salva a captura em Downloads; com mais de um celular, `-Todos` ou `-Serial` |
+| `ferramentas/suite.ps1` | Suíte antes de commit: fim de linha, versão do Rust, fmt, clippy, testes Rust, análise e testes do Flutter; com `-Aparelho`, os testes da ponte, do cofre e do QR no celular, com as medidas; com mais de um celular, `-Todos` ou `-Serial` |
+| `ferramentas/instalar-no-celular.ps1` | Confere a versão do Rust, compila uma vez, instala, confere as permissões do app instalado (câmera sim, microfone e armazenamento não), abre o app, confere o logcat, informa tamanho e densidade da tela e salva a captura em Downloads; com mais de um celular, `-Todos` ou `-Serial` |
 | `ferramentas/medir-leitura-qr.ps1` | Limpa o logcat, espera as leituras do QR feitas à mão e conta as linhas `MEDIDA qr`: regra de 9 em 10 em menos de 2 s, por celular; `-Todos` ou `-Serial` |
 | `ferramentas/aplicar-pacote.ps1` | Aplica um pacote de arquivos inteiros entregue pelo Claude: confere o sha de antes e de depois e lê de volta |
 | `ferramentas/conferir-fim-de-linha.ps1` | Confere pelo `git ls-files --eol` se todo arquivo rastreado segue o `.gitattributes`; a suíte chama |
+| `ferramentas/conferir-rust.ps1` | Confere que o `cargo` do repositório e a `stable` do rustup (a do celular) são a versão do `rust-toolchain.toml`; a suíte e o `instalar-no-celular.ps1` chamam |
 | `ferramentas/oraculos/cofre.py` | Recalcula, sem o código Rust, os vetores conhecidos do cofre da identidade (só quando o formato mudar) |
 | `ferramentas/normalizar-fim-de-linha.ps1` | Aplica o `.gitattributes` ao que já existe: `git add --renormalize` e troca só o fim de linha na pasta |
 
@@ -149,3 +151,5 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 - 06/11/2026: fim de linha fixado pelo `.gitattributes` (regra 3.6), conferido pela suíte. Motivo: o `core.autocrlf` do Windows deixava o mesmo arquivo com sha diferente entre máquinas, e `.cmd` com LF pode falhar no cmd.exe.
 - 07/11/2026: tabela de ferramentas com o oráculo do cofre; a suíte com `-Aparelho` passa a provar o cofre da identidade no celular.
 - 07/11/2026: `suite.ps1 -Aparelho` ganha `-Todos` e `-Serial` e prova o QR do contato; `foto.ps1` deixa de fora `.gradle`, `.kotlin` e `.cxx`; ferramenta nova `medir-leitura-qr.ps1`. Motivo: o teste do QR precisa dos dois celulares no cabo, e a foto levava o cache do Gradle.
+- 07/11/2026: versão do Rust fixada no `rust-toolchain.toml` (regra 5.6) e conferida pelo `conferir-rust.ps1`, chamado pela suíte e pelo `instalar-no-celular.ps1`. Motivo: o clippy 1.98 da máquina do Gabriel acusou um lint que o 1.97 do Claude não tinha, e o Cargokit compila o celular com a `stable` sem ler o `rust-toolchain.toml`.
+- 07/11/2026: regra 4.3 ganha o `& { ... }`. Motivo: colado no console, cada linha do bloco rodava sozinha, e um `RESULTADO: OK` saiu depois de uma suíte que falhou. Nos blocos de commit, um `throw` na conferência não teria impedido o `git add` nem o `git commit` da linha seguinte. Versão do Rust de 1.98.0 para 1.98.1, que corrige código gerado errado; a conferência nova pegou a diferença na primeira rodada.

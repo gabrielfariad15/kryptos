@@ -1,0 +1,15 @@
+# Versao do Rust do Kryptos. A suite, o relay e o editor usam esta; o rustup instala
+# sozinho na primeira vez (o instalar-ferramentas.ps1 tambem instala).
+#
+# O app no celular compila pelo Cargokit, que usa a "stable" do rustup e nao le este
+# arquivo. ferramentas/conferir-rust.ps1 (chamado pela suite e pelo
+# instalar-no-celular) confere que a stable e esta mesma versao.
+#
+# Trocar de versao e decisao: subir o numero aqui, rodar a suite nas duas maquinas e
+# registrar em documentacao/DEPENDENCIAS.md. A 1.98.0 gera codigo errado (tabela de
+# metodos de trait object com ponteiro nulo); a 1.98.1 corrige.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]
+targets = ["aarch64-linux-android"]
+profile = "minimal"

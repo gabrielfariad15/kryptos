@@ -85,6 +85,13 @@ try {
         if ($t -match 'OK\s+fim de linha: (\d+) arquivos') { "$($Matches[1]) arquivos de texto" }
     }
 
+    # ---------- Versao do Rust: a mesma na suite e no celular ----------
+    Passo 'versao do Rust' {
+        $ps = (Get-Process -Id $PID).Path
+        $t = Rodar $ps @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'conferir-rust.ps1'), '-Raiz', $Repo)
+        if ($t -match 'OK\s+versao do Rust: (\S+)') { "$($Matches[1]) na suite e no celular" }
+    }
+
     # ---------- Rust (nucleo, relay e ponte) ----------
     Passo 'cargo fmt' { Rodar 'cargo' @('fmt', '--all', '--', '--check') | Out-Null; 'formatacao em dia' }
     Passo 'cargo clippy' { Rodar 'cargo' @('clippy', '--workspace', '--all-targets', '--', '-D', 'warnings') | Out-Null; 'sem aviso' }

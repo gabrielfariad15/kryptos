@@ -46,6 +46,7 @@ Instaladas por `ferramentas/instalar-ferramentas.ps1`, com versão fixa para o d
 
 | Ferramenta | Versão |
 |---|---|
+| Rust | 1.98.1, no `rust-toolchain.toml`, com clippy, rustfmt e o alvo `aarch64-linux-android`. Não a 1.98.0: ela gera código errado em alguns casos (tabela de métodos de trait object com ponteiro nulo), e a 1.98.1 corrige. A `stable` do rustup tem de ser a mesma, porque o Cargokit compila o app com ela; o `conferir-rust.ps1` confere |
 | Flutter (canal stable) | 3.47.9 (Dart 3.13.7) |
 | NDK do Android | 29.0.14206865 (r29) |
 | SDK do Android | platform 36, build-tools 36.0.0 |

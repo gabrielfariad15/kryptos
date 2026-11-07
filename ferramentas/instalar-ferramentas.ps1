@@ -99,11 +99,22 @@ try {
     $Amb = Get-Content -LiteralPath $arqAmb -Raw -Encoding UTF8 | ConvertFrom-Json
     $sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 
-    # ===== 1. Alvo Android do Rust =====
-    Passo "alvo Rust $AlvoRust" {
-        $inst = @((Rodar 'rustup' @('target', 'list', '--installed')) -split "`n" | ForEach-Object { $_.Trim() })
+    # ===== 1. Rust: a versao do rust-toolchain.toml e o alvo Android na stable =====
+    # A suite usa a versao do rust-toolchain.toml; o Cargokit compila o app com a
+    # stable. O conferir-rust.ps1 (na suite) confere que as duas sao a mesma.
+    $pinoRust = $null
+    foreach ($l in (Get-Content -LiteralPath (Join-Path $Repo 'rust-toolchain.toml') -Encoding UTF8)) {
+        if ($l -match '^\s*channel\s*=\s*"(\d+\.\d+\.\d+)"\s*$') { $pinoRust = $Matches[1] }
+    }
+    if (-not $pinoRust) { throw 'o rust-toolchain.toml nao tem channel = "X.Y.Z"' }
+    Passo "Rust $pinoRust (rust-toolchain.toml)" {
+        Rodar 'rustup' @('toolchain', 'install', $pinoRust, '--profile', 'minimal', '--component', 'clippy', '--component', 'rustfmt', '--target', $AlvoRust) | Out-Null
+        'instalado ou ja estava'
+    }
+    Passo "alvo Rust $AlvoRust na stable (o Cargokit compila com ela)" {
+        $inst = @((Rodar 'rustup' @('target', 'list', '--installed', '--toolchain', 'stable')) -split "`n" | ForEach-Object { $_.Trim() })
         if ($inst -contains $AlvoRust) { 'ja estava' }
-        else { Rodar 'rustup' @('target', 'add', $AlvoRust) | Out-Null; 'instalado' }
+        else { Rodar 'rustup' @('target', 'add', '--toolchain', 'stable', $AlvoRust) | Out-Null; 'instalado' }
     }
 
     # ===== 2. JDK 17 =====
