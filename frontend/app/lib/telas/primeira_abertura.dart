@@ -1,10 +1,11 @@
 // Tela de primeira abertura: gerar o código de contato e criar o PIN.
 //
-// Nesta etapa é só visual (decidido em 06/11/2026). O botão GERAR CÓDIGO e o
-// CONTINUAR ficam desligados até o núcleo ganhar a identidade (vodozemac) e o
-// PIN real (derivação de chave + Keystore), num assunto próprio.
-// O teclado do PIN funciona para conferir o visual; os dígitos ficam só na
-// memória deste widget e não vão para log, disco nem para a tela (regra 8.2).
+// GERAR CÓDIGO pede ao núcleo a identidade (vodozemac) e mostra o código de
+// contato que sai da chave pública. A chave fica no núcleo; aqui só chega o código,
+// que não vai para log (regra 8.2). Nada é gravado: fechar o app perde a identidade.
+// CONTINUAR segue desligado até o PIN real (derivação de chave + Keystore), num
+// assunto próprio. O teclado do PIN funciona para conferir o visual; os dígitos
+// ficam só na memória deste widget e não vão para log, disco nem para a tela.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,10 +25,18 @@ const estiloBarras = SystemUiOverlayStyle(
 );
 
 class PrimeiraAbertura extends StatefulWidget {
-  const PrimeiraAbertura({super.key, required this.versaoNucleo});
+  const PrimeiraAbertura({
+    super.key,
+    required this.versaoNucleo,
+    required this.gerarCodigo,
+  });
 
   /// Versão informada pelo núcleo em Rust, pela ponte.
   final String versaoNucleo;
+
+  /// Gera a identidade no núcleo e devolve o código (XXXX-XXXX). Vem de fora para
+  /// os testes de tela rodarem no computador sem a biblioteca em Rust.
+  final String Function() gerarCodigo;
 
   @override
   State<PrimeiraAbertura> createState() => _PrimeiraAberturaState();
@@ -35,6 +44,25 @@ class PrimeiraAbertura extends StatefulWidget {
 
 class _PrimeiraAberturaState extends State<PrimeiraAbertura> {
   final List<int> _pin = [];
+  String? _codigo;
+  bool _falhou = false;
+
+  void _gerar() {
+    if (_codigo != null) return;
+    try {
+      final codigo = widget.gerarCodigo();
+      setState(() {
+        _codigo = codigo;
+        _falhou = false;
+      });
+    } catch (e) {
+      // Só o tipo do erro: o texto completo fica fora do log por cautela (regra 8.2).
+      debugPrint(
+        'Kryptos: falha ao gerar o código de contato (${e.runtimeType})',
+      );
+      setState(() => _falhou = true);
+    }
+  }
 
   void _digitar(int d) {
     if (_pin.length >= tamanhoPin) return;
@@ -49,6 +77,7 @@ class _PrimeiraAberturaState extends State<PrimeiraAbertura> {
   @override
   void dispose() {
     _pin.clear();
+    _codigo = null;
     super.dispose();
   }
 
@@ -72,7 +101,11 @@ class _PrimeiraAberturaState extends State<PrimeiraAbertura> {
                     children: [
                       const Text('01 · SEU CÓDIGO', style: estiloRotulo),
                       const SizedBox(height: 10),
-                      const _PainelCodigo(),
+                      _PainelCodigo(
+                        codigo: _codigo,
+                        falhou: _falhou,
+                        aoGerar: _gerar,
+                      ),
                       const SizedBox(height: 16),
                       const Text('02 · PIN DE ACESSO', style: estiloRotulo),
                       const SizedBox(height: 10),
@@ -178,33 +211,43 @@ class _Cabecalho extends StatelessWidget {
 }
 
 class _PainelCodigo extends StatelessWidget {
-  const _PainelCodigo();
+  const _PainelCodigo({
+    required this.codigo,
+    required this.falhou,
+    required this.aoGerar,
+  });
+
+  /// Código já gerado, ou nulo enquanto não houver identidade.
+  final String? codigo;
+  final bool falhou;
+  final VoidCallback aoGerar;
 
   @override
   Widget build(BuildContext context) {
+    final gerado = codigo != null;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Cores.painel,
         border: Border.all(color: Cores.linha),
       ),
-      child: const Column(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('CÓDIGO DE CONTATO', style: estiloRotulo),
-          SizedBox(height: 6),
+          const Text('CÓDIGO DE CONTATO', style: estiloRotulo),
+          const SizedBox(height: 6),
           Text(
-            '····-····',
-            key: Key('codigo'),
+            codigo ?? '····-····',
+            key: const Key('codigo'),
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w700,
               letterSpacing: 4,
-              color: Cores.secundario,
+              color: gerado ? Cores.texto : Cores.secundario,
             ),
           ),
-          SizedBox(height: 6),
-          Text(
+          const SizedBox(height: 6),
+          const Text(
             'Criado neste aparelho, a partir da sua chave.',
             style: TextStyle(
               fontSize: 11,
@@ -212,8 +255,17 @@ class _PainelCodigo extends StatelessWidget {
               color: Cores.textoCorrido,
             ),
           ),
-          SizedBox(height: 10),
-          _Botao(rotulo: 'GERAR CÓDIGO', aoTocar: null),
+          if (falhou) ...[
+            const SizedBox(height: 6),
+            const Text(
+              'Não foi possível gerar o código. Toque de novo.',
+              key: Key('falha-codigo'),
+              style: TextStyle(fontSize: 11, height: 1.6, color: Cores.laranja),
+            ),
+          ],
+          const SizedBox(height: 10),
+          // Depois de gerado, o botão desliga: a identidade é uma só por aparelho.
+          _Botao(rotulo: 'GERAR CÓDIGO', aoTocar: gerado ? null : aoGerar),
         ],
       ),
     );

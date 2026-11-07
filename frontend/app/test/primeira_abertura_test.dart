@@ -1,4 +1,5 @@
-// Testes da tela no computador, sem o núcleo em Rust (a versão é injetada).
+// Testes da tela no computador, sem o núcleo em Rust (a versão e o gerador do
+// código são injetados).
 
 import 'dart:io';
 
@@ -35,9 +36,15 @@ const motorolaEdge40Neo = Aparelho(
 // Celular pequeno comum (360 x 740 dp), para provar que nada some quando não cabe.
 const pequeno = Aparelho('pequeno 360x740', 1080, 2220, 3.0, 72, 144);
 
+/// Código do vetor conhecido do núcleo (nucleo/src/codigo.rs), usado como falso.
+const codigoFalso = '2J2F-P63Y';
+
+String gerarFalso() => codigoFalso;
+
 Future<void> abrir(
   WidgetTester tester, {
   Aparelho aparelho = motorolaEdge40Neo,
+  String Function() gerarCodigo = gerarFalso,
 }) async {
   tester.view.physicalSize = Size(aparelho.largura, aparelho.altura);
   tester.view.devicePixelRatio = aparelho.densidade;
@@ -50,8 +57,20 @@ Future<void> abrir(
     bottom: aparelho.barraBase,
   );
   addTearDown(tester.view.reset);
-  await tester.pumpWidget(const KryptosApp(versaoNucleo: '9.8.7'));
+  await tester.pumpWidget(
+    KryptosApp(versaoNucleo: '9.8.7', gerarCodigo: gerarCodigo),
+  );
 }
+
+Future<void> tocarBotao(WidgetTester tester, String rotulo) async {
+  final alvo = find.byKey(Key('botao-$rotulo'));
+  await tester.ensureVisible(alvo);
+  await tester.tap(alvo);
+  await tester.pump();
+}
+
+VoidCallback? acaoDoBotao(WidgetTester tester, String rotulo) =>
+    tester.widget<InkWell>(find.byKey(Key('botao-$rotulo'))).onTap;
 
 /// Linha de base do texto na tela: topo do parágrafo + distância até a base,
 /// medida com o mesmo texto e a mesma escala que o parágrafo usou.
@@ -221,14 +240,75 @@ void main() {
     expect(find.text('7'), findsOneWidget);
   });
 
-  testWidgets('GERAR CÓDIGO e CONTINUAR ficam desligados nesta etapa', (
+  testWidgets(
+    'abre com GERAR CÓDIGO ligado, CONTINUAR desligado e sem código',
+    (tester) async {
+      await abrir(tester);
+      expect(acaoDoBotao(tester, 'GERAR CÓDIGO'), isNotNull);
+      expect(acaoDoBotao(tester, 'CONTINUAR'), isNull);
+      expect(find.text('····-····'), findsOneWidget);
+    },
+  );
+
+  testWidgets('GERAR CÓDIGO mostra o código no lugar dos pontos', (
     tester,
   ) async {
     await abrir(tester);
-    for (final rotulo in ['GERAR CÓDIGO', 'CONTINUAR']) {
-      final botao = tester.widget<InkWell>(find.byKey(Key('botao-$rotulo')));
-      expect(botao.onTap, isNull, reason: '$rotulo deveria estar desligado');
-    }
-    expect(find.text('····-····'), findsOneWidget);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    expect(find.text(codigoFalso), findsOneWidget);
+    expect(find.text('····-····'), findsNothing);
+    expect(acaoDoBotao(tester, 'GERAR CÓDIGO'), isNull);
+    expect(acaoDoBotao(tester, 'CONTINUAR'), isNull);
   });
+
+  testWidgets('código gerado não estoura o layout com fonte de 160%', (
+    tester,
+  ) async {
+    tester.platformDispatcher.textScaleFactorTestValue = 1.6;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await abrir(tester);
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    expect(tester.takeException(), isNull);
+    expect(find.text(codigoFalso), findsOneWidget);
+  });
+
+  testWidgets('a identidade é gerada uma vez só, mesmo tocando de novo', (
+    tester,
+  ) async {
+    var chamadas = 0;
+    await abrir(
+      tester,
+      gerarCodigo: () {
+        chamadas++;
+        return codigoFalso;
+      },
+    );
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    await tocarBotao(tester, 'GERAR CÓDIGO');
+    expect(chamadas, 1);
+  });
+
+  testWidgets(
+    'falha do núcleo mostra aviso, não quebra e deixa tentar de novo',
+    (tester) async {
+      var chamadas = 0;
+      await abrir(
+        tester,
+        gerarCodigo: () {
+          chamadas++;
+          if (chamadas == 1) throw StateError('núcleo indisponível');
+          return codigoFalso;
+        },
+      );
+      await tocarBotao(tester, 'GERAR CÓDIGO');
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('falha-codigo')), findsOneWidget);
+      expect(find.text('····-····'), findsOneWidget);
+      expect(acaoDoBotao(tester, 'GERAR CÓDIGO'), isNotNull);
+
+      await tocarBotao(tester, 'GERAR CÓDIGO');
+      expect(find.byKey(const Key('falha-codigo')), findsNothing);
+      expect(find.text(codigoFalso), findsOneWidget);
+    },
+  );
 }

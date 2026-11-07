@@ -4,7 +4,8 @@ Toda dependência nova entra aqui antes de entrar no código (regra 8.6). AGPL e
 
 | Dependência | Onde | Licença | Versão | Situação | Motivo |
 |---|---|---|---|---|---|
-| vodozemac | nucleo | Apache-2.0 | a definir | planejada | Conversa entre duas pessoas (Olm / Double Ratchet); auditada pela Least Authority |
+| vodozemac | nucleo | Apache-2.0 (conferido em 07/11/2026) | =0.11.2, sem os recursos padrão, só com `precomputed-tables` | em uso | Identidade do aparelho (conta Olm) e, adiante, a conversa entre duas pessoas (Double Ratchet); auditada pela Least Authority. A 0.11.2 (05/11/2026) corrige zeroização de chaves; o `libolm-compat` ficou fora porque não importamos conta do libolm |
+| sha2 | nucleo | MIT OR Apache-2.0 (conferido em 07/11/2026) | 0.11 | em uso | SHA-256 do código de contato. É a mesma versão que o vodozemac já usa, então não entra crate novo na compilação |
 | openmls | nucleo | MIT | a definir | planejada (fase de grupos) | Grupos (MLS, RFC 9420) |
 | flutter_rust_bridge (crate e pacote Dart) | frontend/app/rust + frontend/app | MIT (conferido em 06/11/2026) | =2.13.0 | em uso | Ponte entre o app Flutter e o núcleo em Rust. O gerador `flutter_rust_bridge_codegen` tem de estar na mesma versão |
 | axum | backend/relay | MIT | 0.8.9 | em uso | Rotas HTTP do relay |
@@ -15,6 +16,8 @@ Toda dependência nova entra aqui antes de entrar no código (regra 8.6). AGPL e
 | http-body-util | backend/relay (só testes) | MIT | 0.1 | em uso | Ler o corpo da resposta nos testes |
 | IBM Plex Mono (fonte) | frontend/app/assets/fonts | OFL-1.1 | 2.5.0 | em uso | Fonte única do visual; embutida no app, com a licença em `OFL-IBM-Plex-Mono.txt` |
 | integration_test, flutter_test, flutter_lints | frontend/app (só desenvolvimento) | BSD-3-Clause (Flutter) | do Flutter 3.47.9 | em uso | Testes da tela e teste da ponte no aparelho |
+
+Conferência da árvore do núcleo em 07/11/2026, depois do vodozemac: 75 crates sem repetição (medido com `cargo tree -p kryptos_nucleo -e normal`; 77 contando os de compilação), todos MIT, Apache-2.0, BSD-3-Clause, Unicode-3.0 ou Unlicense. Nenhuma GPL ou AGPL.
 
 Conferência das dependências indiretas em 06/11/2026: 130 crates no `Cargo.lock` e 42 pacotes Dart, todos MIT, Apache-2.0, BSD, Zlib, Unlicense, BSL-1.0 ou Unicode-3.0. Nenhuma GPL ou AGPL. O `allo-isolate` (indireta do flutter_rust_bridge) não declara licença no `Cargo.toml`, mas traz o arquivo `LICENSE` com a Apache-2.0.
 

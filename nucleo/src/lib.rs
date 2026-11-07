@@ -1,8 +1,17 @@
 //! Núcleo do Kryptos: o motor que roda no aparelho.
 //!
-//! Nesta etapa ele só expõe a própria versão, para provar a ponte com o app.
-//! Criptografia (vodozemac), protocolo e queima entram nas próximas etapas, cada
-//! uma com teste de vetor conhecido e teste de adulteração (regra 8.4).
+//! - `identidade`: a conta Olm (vodozemac) do aparelho, só na memória.
+//! - `codigo`: o código de contato que sai da chave pública.
+//! - `aparelho`: guarda a identidade desta execução; a chave não atravessa a ponte.
+//!
+//! Protocolo, queima e gravação cifrada entram nas próximas etapas, cada uma com
+//! teste de vetor conhecido e teste de adulteração (regra 8.4).
+
+pub mod aparelho;
+pub mod codigo;
+pub mod identidade;
+
+pub use codigo::{CodigoContato, ErroCodigo};
 
 /// Versão do núcleo, tirada do `Cargo.toml` na compilação.
 pub fn versao() -> &'static str {

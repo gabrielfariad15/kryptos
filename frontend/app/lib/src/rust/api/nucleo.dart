@@ -9,3 +9,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 /// Versão do núcleo compilado dentro do app.
 String versaoNucleo() => RustLib.instance.api.crateApiNucleoVersaoNucleo();
+
+/// Gera a identidade do aparelho (uma vez por execução) e devolve o código de
+/// contato no formato XXXX-XXXX. A chave fica no núcleo; só o código atravessa.
+String gerarCodigoContato() =>
+    RustLib.instance.api.crateApiNucleoGerarCodigoContato();
