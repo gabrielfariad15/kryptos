@@ -14,6 +14,7 @@ use vodozemac::olm::IdentityKeys;
 
 use crate::cartao::{CartaoContato, ErroCartao};
 use crate::codigo::CodigoContato;
+use crate::qr::ErroQr;
 
 /// Como a chave do contato foi conferida.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +71,8 @@ pub enum ErroAgenda {
     Conflito,
     /// Não há identidade na memória para comparar.
     SemIdentidade,
+    /// O quadro da câmera não pôde ser lido (tamanho errado ou pânico do leitor).
+    Quadro(ErroQr),
 }
 
 impl ErroAgenda {
@@ -79,6 +82,7 @@ impl ErroAgenda {
             Self::Proprio => "QR_PROPRIO",
             Self::Conflito => "QR_CONFLITO",
             Self::SemIdentidade => "SEM_IDENTIDADE",
+            Self::Quadro(e) => e.codigo(),
         }
     }
 }
@@ -90,6 +94,12 @@ impl std::fmt::Display for ErroAgenda {
 }
 
 impl std::error::Error for ErroAgenda {}
+
+impl From<ErroQr> for ErroAgenda {
+    fn from(e: ErroQr) -> Self {
+        Self::Quadro(e)
+    }
+}
 
 impl From<ErroCartao> for ErroAgenda {
     fn from(e: ErroCartao) -> Self {
@@ -320,6 +330,9 @@ mod testes {
             ErroAgenda::Cartao(ErroCartao::Formato).codigo(),
             ErroAgenda::Cartao(ErroCartao::ChaveInvalida).codigo(),
             ErroAgenda::Cartao(ErroCartao::NaoConfere).codigo(),
+            ErroAgenda::Quadro(ErroQr::QuadroInvalido).codigo(),
+            ErroAgenda::Quadro(ErroQr::Geracao).codigo(),
+            ErroAgenda::Quadro(ErroQr::Leitor).codigo(),
         ];
         let mut unicos = todos.to_vec();
         unicos.sort_unstable();

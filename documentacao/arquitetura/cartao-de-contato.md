@@ -70,10 +70,26 @@ Mesmo código com outra chave nunca é tratado como o mesmo contato. O código t
 
 Calibração dos testes (07/11/2026): seis sabotagens, uma por vez, e cada uma derrubou pelo menos um teste. Foram tirados: a recusa do próprio QR, o conflito por código, o conflito com o próprio aparelho, o "já estava", a limpeza da agenda ao esquecer e a limpeza ao abrir o cofre. Os testes que mexem no estado global rodam em série; 20 rodadas seguidas deram 20 verdes.
 
+## QR (nucleo/src/qr.rs)
+
+- **Gerar:** crate `qrcode`, correção de erro M. O cartão de 121 caracteres sai na versão 5, 37 × 37 módulos. A tela recebe só a grade e desenha 4 módulos de margem clara em volta.
+- **Ler:** crate `rxing`, só QR. Recebe o plano de brilho da câmera (1 byte por pixel) e o passo da linha, que a câmera pode completar além da largura. O texto achado ainda passa pela leitura estrita do cartão.
+- **Quadro vindo de fora:** o tamanho é conferido antes de qualquer cópia (mínimo 21 × 21, máximo 16 MP, buffer do tamanho que largura, altura e passo dizem). Um pânico dentro do leitor vira o erro `QR_LEITOR` em vez de derrubar o app.
+- **Na agenda:** `adicionar_contato_do_quadro` responde nada quando o quadro não tem QR (a câmera segue para o próximo) e erro quando acha um QR recusado: de outro app, adulterado ou o próprio.
+
+Medido em 07/11/2026, no computador:
+
+- **Leitura em fotos simuladas com desfoque** (3, 4 e 6 pixels por módulo, giro até 45°, ruído e contraste baixo): 106 de 144. O teste falha se cair abaixo de 100.
+- **Tempo de um quadro de 1280 × 720:** 3 ms com ou sem QR, com o `rxing` otimizado também no build de debug. Sem essa otimização, 31 ms. O número que vale é o do celular, a medir.
+- **`TryHarder` do leitor:** tirado. Não mudou nem a leitura (106 com e sem) nem o tempo.
+- **Calibração:** seis sabotagens. Cinco derrubaram um teste cada: ignorar o passo da linha, tirar o lado mínimo, tirar o limite de 16 MP, alterar o texto lido e não pôr na agenda o QR achado. A sexta, tirar o `TryHarder`, não derrubou nada, e por isso ele saiu. Isenção: a troca do pânico por erro não tem teste, porque não há quadro conhecido que faça o `rxing` entrar em pânico; ela fica pelo motivo escrito acima. Os 60 quadros de lixo do teste não derrubaram o leitor nem viraram cartão.
+
 ## O que não resolve
 
 - **Chave Curve25519 de ordem baixa não é recusada na leitura.** Quem recusa é o vodozemac, ao abrir a sessão (`SessionCreationError::NonContributoryKey`, conferido no código da 0.11.2). Fica para o assunto da conversa provar com teste.
 - **Quem mostra o QR pode mostrar a chave de outra pessoa.** Ela não ganha nada com isso, porque não tem a chave secreta, mas o contato fica com o nome errado. A leitura pessoal prova "esta é a chave que este aparelho mostra", não "este aparelho é desta pessoa".
 - **Aparelho comprometido** mostra a chave que o atacante quiser.
 - **Agenda em memória:** fechar o app perde os contatos, e eles precisam ser lidos de novo.
+- **Fotos simuladas não são câmera.** Reflexo na tela, foco, tremor e tela com brilho baixo só aparecem no aparelho. Lá vale a regra de 9 em 10 leituras em menos de 2 s.
+- **Um QR por quadro:** se houver dois QR no quadro, o leitor devolve um só, e pode ser o do outro app.
 - **Print da tela:** o QR é a chave pública, não é segredo, mas quem fotografar a tela ganha o contato. O `FLAG_SECURE` ainda não está no app (a captura do G15 de 07/11/2026 saiu normal).

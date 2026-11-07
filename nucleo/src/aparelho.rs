@@ -9,7 +9,8 @@
 //! Abrir (aberturas seguintes):
 //!   `preparar_abertura` → HMAC no Keystore → `abrir_cofre`
 //! Contatos (só em memória):
-//!   `cartao_proprio` para mostrar o QR; `adicionar_contato_por_qr` com o texto lido.
+//!   `grade_propria` para desenhar o QR; `adicionar_contato_do_quadro` com cada quadro
+//!   da câmera (ou `adicionar_contato_por_qr` com o texto já lido).
 //!
 //! Ordem das travas: a da identidade é solta antes de pegar a da agenda. Nenhuma
 //! função segura as duas ao mesmo tempo, então não há como travar uma na outra.
@@ -26,6 +27,7 @@ use crate::codigo::CodigoContato;
 use crate::cofre::{self, Custo, ErroCofre, Resultado, TAMANHO_CHAVE, TAMANHO_SAL, Varredura};
 use crate::contatos::{Adicao, Agenda, Contato, ErroAgenda};
 use crate::identidade::Identidade;
+use crate::qr::{self, GradeQr};
 
 static IDENTIDADE: Mutex<Option<Identidade>> = Mutex::new(None);
 static AGENDA: Mutex<Agenda> = Mutex::new(Agenda::nova());
@@ -76,6 +78,28 @@ pub fn adicionar_contato_por_qr(texto: &str) -> Result<Adicao, ErroAgenda> {
         .map(Identidade::chaves_publicas)
         .ok_or(ErroAgenda::SemIdentidade)?;
     trava_agenda().adicionar_por_qr(texto, &proprio)
+}
+
+/// Grade do QR deste aparelho, para a tela desenhar. `None` sem identidade na memória.
+pub fn grade_propria() -> Result<Option<GradeQr>, qr::ErroQr> {
+    cartao_proprio()
+        .map(|c| qr::grade_do_cartao(&c))
+        .transpose()
+}
+
+/// Procura um QR no quadro de brilho da câmera e, se achar, tenta pôr o contato na
+/// agenda. `Ok(None)`: o quadro não tem QR legível, e a câmera segue para o próximo.
+/// Um QR achado mas recusado (de outro app, adulterado, o próprio) volta como erro.
+pub fn adicionar_contato_do_quadro(
+    brilho: &[u8],
+    largura: usize,
+    altura: usize,
+    passo: usize,
+) -> Result<Option<Adicao>, ErroAgenda> {
+    match qr::ler_quadro(brilho, largura, altura, passo)? {
+        None => Ok(None),
+        Some(texto) => adicionar_contato_por_qr(&texto).map(Some),
+    }
 }
 
 /// Cópia da agenda, na ordem em que os contatos entraram.
@@ -337,10 +361,37 @@ mod testes {
         );
         assert_eq!(contatos().len(), 1);
 
+        // pelo quadro da câmera: sem QR não muda nada; com o QR de outro, entra
+        let outro2 = Identidade::nova();
+        let grade = qr::grade_do_cartao(&CartaoContato::de_chaves(&outro2.chaves_publicas()))?;
+        let (lado, foto) = qr::testes::Foto::nitida(4).desenhar(&grade);
+        assert_eq!(
+            adicionar_contato_do_quadro(&vec![200u8; lado * lado], lado, lado, lado)?,
+            None
+        );
+        assert_eq!(
+            adicionar_contato_do_quadro(&foto, lado, lado, lado)?,
+            Some(Adicao::Novo(outro2.codigo_contato()))
+        );
+        assert_eq!(contatos().len(), 2);
+        // o próprio QR pela câmera é recusado
+        let (lado, minha_foto) = qr::testes::Foto::nitida(4)
+            .desenhar(&grade_propria()?.ok_or(ErroAgenda::SemIdentidade)?);
+        assert_eq!(
+            adicionar_contato_do_quadro(&minha_foto, lado, lado, lado),
+            Err(ErroAgenda::Proprio)
+        );
+        // quadro de tamanho errado não derruba
+        assert_eq!(
+            adicionar_contato_do_quadro(&foto, lado + 1, lado, lado + 1),
+            Err(ErroAgenda::Quadro(qr::ErroQr::QuadroInvalido))
+        );
+
         // "fechar o app" apaga a agenda junto com a identidade
         esquecer();
         assert!(contatos().is_empty());
         assert!(cartao_proprio().is_none());
+        assert_eq!(grade_propria(), Ok(None));
         Ok(())
     }
 

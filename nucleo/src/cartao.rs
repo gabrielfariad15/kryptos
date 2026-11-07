@@ -234,7 +234,7 @@ fn decodificar(texto: &[u8]) -> Result<[u8; BYTES_CHAVES], ErroCartao> {
 }
 
 #[cfg(test)]
-mod testes {
+pub(crate) mod testes {
     use super::*;
     use crate::identidade::Identidade;
 
@@ -254,7 +254,7 @@ mod testes {
 
     /// Calculado fora do Rust por ferramentas/oraculos/cartao.py (biblioteca padrão do
     /// Python, base32 e Luhn escritos à parte; calibrado pelo código 2J2F-P63Y).
-    const CARTAO_DO_VETOR: &str = "KRYPTOS1-TXD9G0C2P45BFNABZV9WJS07787E2WQKVAK269DF08D6HXR7A4D8A87G164K19TMEJ5QVQ5M7VVNM3DZ786JCE0TYKNT9ACENADMWTG-2J2FP63Y";
+    pub(crate) const CARTAO_DO_VETOR: &str = "KRYPTOS1-TXD9G0C2P45BFNABZV9WJS07787E2WQKVAK269DF08D6HXR7A4D8A87G164K19TMEJ5QVQ5M7VVNM3DZ786JCE0TYKNT9ACENADMWTG-2J2FP63Y";
 
     fn chaves_do_vetor() -> Result<IdentityKeys, String> {
         Ok(IdentityKeys {

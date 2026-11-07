@@ -29,6 +29,12 @@ getrandom = "0.4.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 base64 = "0.23.1"
+# QR do cartao de contato (documentacao/arquitetura/cartao-de-contato.md).
+# rxing sem os padroes (com eles, 264 crates): so QR, so leitura, conjunto de caracteres
+# pelo encoding_rs. Exata: e o leitor de imagem vinda de fora, troca de versao e decisao.
+rxing = { version = "=0.9.3", default-features = false, features = ["qrcode", "decoders", "encoding_rs"] }
+# Sem os padroes (image, svg, pic): so a grade de modulos, sem crate nenhum a mais.
+qrcode = { version = "=0.14.1", default-features = false }
 anyhow = "1.0.104"
 axum = "0.8.9"
 tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal"] }
@@ -43,6 +49,11 @@ http-body-util = "0.1"
 opt-level = 3
 
 [profile.dev.package.blake2]
+opt-level = 3
+
+# Leitor de QR otimizado tambem no debug: roda em cada quadro da camera, e sem isso o
+# tempo medido no celular em desenvolvimento nao seria o do app de verdade.
+[profile.dev.package.rxing]
 opt-level = 3
 
 [workspace.lints.rust]

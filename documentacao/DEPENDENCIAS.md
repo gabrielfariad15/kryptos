@@ -12,6 +12,9 @@ Toda dependência nova entra aqui antes de entrar no código (regra 8.6). AGPL e
 | getrandom | nucleo | MIT OR Apache-2.0 (conferido em 07/11/2026) | 0.4 | em uso | Sal e nonce do cofre, do gerador do sistema. Já vinha pelo vodozemac |
 | serde, serde_json | nucleo | MIT OR Apache-2.0 (conferido em 07/11/2026) | 1.0 | em uso | Ler as chaves secretas da conta para a varredura do disco. Já vinham pelo vodozemac |
 | base64 | nucleo | MIT OR Apache-2.0 (conferido em 07/11/2026) | 0.23 | em uso | Formas em base64 que a varredura procura. Já vinha pelo vodozemac |
+| rxing | nucleo | Apache-2.0 (conferido em 07/11/2026) | =0.9.3, sem os recursos padrão, só `qrcode`, `decoders` e `encoding_rs` | em uso | Ler o QR do cartão no quadro da câmera. Escrito em Rust: o quadro é imagem vinda de fora, e leitor em C++ (zxing-cpp, `flutter_zxing`) seria a parte mais exposta do app. Na comparação de 07/11/2026, em 216 imagens degradadas iguais, leu 161, contra 163 do zxing-cpp e 91 do `rqrr` (recusado). Com os recursos padrão traria 264 crates. Otimizado também no build de debug (`profile.dev.package.rxing`): o quadro de 1280×720 cai de 31 ms para 3 ms no computador |
+| qrcode | nucleo | MIT OR Apache-2.0 (conferido em 07/11/2026) | =0.14.1, sem os recursos padrão | em uso | Gerar a grade do QR do cartão, que a tela desenha. Sem os recursos padrão não traz crate nenhum |
+| camera (pacote Dart) | frontend/app | BSD-3-Clause; no Android, `camera_android_camerax` (BSD-3-Clause, flutter.dev) sobre o CameraX do AndroidX | a definir no passo da tela | planejada (contato por QR) | Quadros da câmera traseira para o leitor do núcleo. Sem serviço do Google |
 | anyhow | frontend/app/rust | MIT OR Apache-2.0 (conferido em 07/11/2026) | 1.0 | em uso | Erro da ponte: chega ao Dart como `AnyhowException` com o código fixo do núcleo. Já vinha pelo flutter_rust_bridge |
 | openmls | nucleo | MIT | a definir | planejada (fase de grupos) | Grupos (MLS, RFC 9420) |
 | flutter_rust_bridge (crate e pacote Dart) | frontend/app/rust + frontend/app | MIT (conferido em 06/11/2026) | =2.13.0 | em uso | Ponte entre o app Flutter e o núcleo em Rust. O gerador `flutter_rust_bridge_codegen` tem de estar na mesma versão |
@@ -26,6 +29,10 @@ Toda dependência nova entra aqui antes de entrar no código (regra 8.6). AGPL e
 | integration_test, flutter_test, flutter_lints | frontend/app (só desenvolvimento) | BSD-3-Clause (Flutter) | do Flutter 3.47.9 | em uso | Testes da tela e teste da ponte no aparelho |
 
 Conferência da árvore do núcleo em 07/11/2026, depois do cofre da identidade: 77 crates sem repetição (medido com `cargo tree -p kryptos_nucleo -e normal`; 79 contando os de compilação). Antes do cofre eram 75 e 77; entraram `argon2` e `blake2`. Todos MIT, Apache-2.0, BSD-3-Clause, Unicode-3.0 ou Unlicense. Nenhuma GPL ou AGPL.
+
+Conferência da árvore do núcleo em 07/11/2026, depois do QR do cartão: 100 crates sem repetição, sem contar o próprio núcleo (medido com `cargo tree -p kryptos_nucleo -e normal` no Linux). Antes eram 77. Entraram 23: `rxing` e `qrcode`; `encoding_rs` e `codepage-437` (conjunto de caracteres do leitor); `regex`, `regex-automata`, `regex-syntax` e `aho-corasick`; `num` e cinco `num-*`; `chrono` e `iana-time-zone`; `once_cell`, `scopeguard`, `simdutf8`, `unicode-segmentation`, `core_detect` e `multiversion_no_op`. Todos MIT, Apache-2.0, BSD-3-Clause ou Unlicense. Nenhuma GPL ou AGPL. No Android o `iana-time-zone` deve trazer mais um crate (`android_system_properties`, MIT OR Apache-2.0; estimo, não medido).
+
+Peso medido em 07/11/2026, na biblioteca da ponte em modo de distribuição, Linux x86_64, sem símbolos: 1.225.008 bytes sem o QR; 1.272.128 só com o gerador (mais 47 KB); 1.947.280 com gerador e leitor (mais 722 KB). No arm64 do celular estimo da mesma ordem, por processador incluído no APK.
 
 Conferência das dependências indiretas em 06/11/2026: 130 crates no `Cargo.lock` e 42 pacotes Dart, todos MIT, Apache-2.0, BSD, Zlib, Unlicense, BSL-1.0 ou Unicode-3.0. Nenhuma GPL ou AGPL. O `allo-isolate` (indireta do flutter_rust_bridge) não declara licença no `Cargo.toml`, mas traz o arquivo `LICENSE` com a Apache-2.0.
 
@@ -46,5 +53,8 @@ Instaladas por `ferramentas/instalar-ferramentas.ps1`, com versão fixa para o d
 | Dependência | Motivo |
 |---|---|
 | libsignal | AGPL-3.0: obrigaria abrir o código do app inteiro |
+| rqrr | MIT OR Apache-2.0, mas leu 91 de 216 imagens degradadas na comparação de 07/11/2026, contra 161 do `rxing` |
+| mobile_scanner (pacote Dart) | No Android usa o ML Kit do Google, que pode mandar métricas de uso ao Google: fere a decisão de não falar com o Google |
+| flutter_zxing (pacote Dart) | Reserva, não recusa: leu tão bem quanto o `rxing` (zxing-cpp, 163 de 216), mas é C++ lendo imagem vinda de fora e precisa compilar C++ com o NDK. Entra se o `rxing` não ler 9 em 10 no aparelho |
 | vodozemac (pacote Dart do pub.dev) | AGPL-3.0, embora o crate em Rust seja Apache-2.0. Usar o crate com ponte própria |
 | google_fonts (pacote Dart) | Baixa a fonte de servidor do Google na hora de rodar: fere a decisão de não falar com o Google e o funcionamento sem internet |

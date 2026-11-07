@@ -4,6 +4,7 @@
 //! - `codigo`: o código de contato que sai da chave pública.
 //! - `cartao`: o texto do QR, com a chave pública inteira.
 //! - `contatos`: a agenda desta execução, só em memória.
+//! - `qr`: a grade do QR do cartão e a leitura do quadro da câmera.
 //! - `cofre`: a identidade gravada cifrada (PIN + Keystore).
 //! - `aparelho`: guarda a identidade desta execução e conduz o cofre; a chave não
 //!   atravessa a ponte.
@@ -17,10 +18,12 @@ pub mod codigo;
 pub mod cofre;
 pub mod contatos;
 pub mod identidade;
+pub mod qr;
 
 pub use cartao::{CartaoContato, ErroCartao};
 pub use codigo::{CodigoContato, ErroCodigo};
 pub use contatos::{Adicao, Conferencia, Contato, ErroAgenda};
+pub use qr::{ErroQr, GradeQr};
 
 /// Versão do núcleo, tirada do `Cargo.toml` na compilação.
 pub fn versao() -> &'static str {
