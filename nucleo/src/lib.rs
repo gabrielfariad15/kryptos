@@ -5,6 +5,7 @@
 //! - `cartao`: o texto do QR, com a chave pública inteira.
 //! - `contatos`: a agenda de contatos (até 5.000).
 //! - `agenda_gravada`: a agenda no disco, cifrada com a chave do cofre, tamanho fixo.
+//! - `caixa`: as mensagens recebidas, seladas em 100 gavetas de tamanho fixo.
 //! - `qr`: a grade do QR do cartão e a leitura do quadro da câmera.
 //! - `cofre`: a identidade gravada cifrada (PIN + Keystore).
 //! - `aparelho`: guarda a identidade desta execução e conduz o cofre; a chave não
@@ -16,6 +17,7 @@
 
 pub mod agenda_gravada;
 pub mod aparelho;
+pub mod caixa;
 pub mod cartao;
 pub mod codigo;
 pub mod cofre;

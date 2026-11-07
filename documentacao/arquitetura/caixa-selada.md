@@ -1,0 +1,128 @@
+# Caixa selada
+
+## Para que serve
+
+Guardar a mensagem recebida até a pessoa decidir ler, sem deixar o texto no disco, e depois queimá-la de verdade. Decisões de 07/11/2026:
+
+- **Selar na chegada.** O núcleo abre a camada Olm só na memória e sela o texto com a chave de uma gaveta. O texto só abre quando a pessoa manda descriptografar.
+- **Sem aviso de leitura e sem "digitando".** O relay não tem canal de volta para quem mandou.
+- **Queima:** 1 minuto depois de lida. Na hora, ao sair do app ou ao apagar a tela.
+- **Carta de conversa encerrada** (o app fechou e a conversa morreu): não abre, e a tela mostra só "N mensagens não puderam ser abertas".
+- **Capacidade e limite:** 100 mensagens não queimadas, de até 65.536 bytes de texto cada (uns 60 mil caracteres em português, estimo).
+
+## Arquivos
+
+Mesma pasta do cofre (`noBackupFilesDir`). Todos existem desde a criação do cofre e têm sempre o mesmo tamanho: o disco não diz quantas mensagens há.
+
+**Gavetas:** `gaveta-00.kryptos` até `gaveta-99.kryptos`, cada uma com 65.644 bytes (medido no teste `tamanhos_fixos`). São 6.564.400 bytes ao todo.
+
+| Bytes | Campo |
+|---|---|
+| 24 | nonce, sorteado a cada selagem |
+| 65.604 | XChaCha20-Poly1305 de: Ed25519 do remetente (32), Curve25519 do remetente (32), tamanho do texto (u32 LE), texto completado com zeros até 65.536 |
+| 16 | etiqueta |
+
+- **Chave:** `HKDF-SHA256(ikm = HMAC do Keystore sobre o pedido, info = "KRYPTOS/gaveta/v1")`.
+- **Pedido:** `"KRYPTOS/gaveta/v1" || número da gaveta || nonce` (42 bytes).
+- **Dado autenticado:** `"KRYPTOS/gaveta/v1" || número da gaveta`. Uma gaveta copiada para outro lugar não abre.
+- **Gaveta vazia:** 65.644 bytes aleatórios. Não há cabeçalho fixo, então a vazia não se distingue da ocupada.
+
+**Índice:** `caixa.kryptos`, 4.157 bytes, cifrado com uma chave tirada da chave do cofre (`info = "KRYPTOS/caixa/v1"`), como a agenda:
+
+- `"KRYCAIXA"`, versão (1), nonce (24);
+- cifrado: próximo número (u64), seguido de 100 × (estado, número, resumo);
+- **estado:** livre, reservada, não lida, lida ou queimada;
+- **número:** ordem de chegada (não é data);
+- **resumo:** SHA-256 da carta, para reconhecer a mesma carta entregue de novo.
+
+Leitura estrita: estado desconhecido, gaveta sem carta com número ou resumo, número fora da faixa ou repetido, tudo isso é `CAIXA_CORROMPIDA`.
+
+## Chaves no Keystore
+
+Uma chave HMAC por gaveta, 100 ao todo, que existem sempre (parte do Kotlin, próxima etapa). Queimar uma gaveta é sobrescrevê-la com bytes aleatórios e trocar a chave dela no hardware: apagar e criar outra. O número de chaves não muda, então o Keystore também não diz quantas mensagens há.
+
+## Etapas
+
+**Chegada** (`receber_carta`, a porta única, venha a carta do relay ou do modo Direto):
+
+1. **Carta fora do formato:** erro `PROTOCOLO_*`. O app confirma ao relay e descarta.
+2. **Destinatário diferente** deste aparelho: `NaoEParaMim` (o rádio ouve todo mundo).
+3. **Resumo igual ao de uma carta guardada:** `JaGuardada`. O app confirma ao relay.
+4. **Nenhuma gaveta livre:** `CaixaCheia`. O app não confirma, a carta fica no relay e a conversa não anda, porque a carta nem foi aberta.
+5. **Decifrar:**
+   - Primeira mensagem: o remetente é achado na agenda pela chave Curve25519 que vem na mensagem.
+   - Mensagem comum: tenta cada conversa aberta. O vodozemac só muda a conversa quando a autenticação confere (lido no código da 0.11.2, `receiver_chain.rs`).
+   - Não abriu, ou o texto passa de 65.536 bytes: `NaoAbre`. Entra na conta de `nao_abertas`, e o app confirma ao relay.
+6. **Disco primeiro:** a gaveta é marcada como reservada no índice. Depois sai o pedido para o Keystore (`Selar`).
+
+**Selagem** (`selar_chegada`, com o HMAC):
+
+1. Sela, grava a gaveta e confere lendo de volta.
+2. Abre de novo com o mesmo HMAC e compara.
+3. Marca a gaveta como não lida no índice.
+
+Só então o app confirma ao relay. Se algo falhar, a carta continua esperando: tenta de novo ou `desistir_da_chegada`.
+
+**Leitura** (`pedido_de_leitura` → HMAC → `ler`): abre a gaveta, marca como lida no índice e só então devolve remetente e texto. O minuto começa a contar no relógio monotônico.
+
+**Queima:**
+
+- `queimar_vencidas`: o app chama a cada segundo e queima as lidas há 60 s ou mais.
+- `queimar_lidas`: o app chama ao abrir, ao sair e ao apagar a tela. Queima na hora as lidas, as reservadas que nunca foram seladas e termina as queimas interrompidas.
+- Cada queima segue esta ordem:
+  1. marca a gaveta como queimada no índice (disco primeiro);
+  2. sobrescreve a gaveta com bytes aleatórios e confere;
+  3. o Kotlin troca a chave;
+  4. `chave_trocada` libera a gaveta.
+- App morto no meio do minuto: ao abrir, a lida queima na hora.
+
+## Vetores conhecidos
+
+O teste `vetores_conhecidos` confere o SHA-256 de uma gaveta e de um índice fixos:
+
+- **gaveta:** `0aa74af231362518b38e1a503245b8c7199f9c65161267f8adee0546f2baa33e`
+- **índice:** `9b3403a80ecb722593ac2585c1687edb0d613eb82bd6833a906ef18991721634`
+
+Os mesmos valores saem do oráculo `ferramentas/oraculos/caixa.py`, sem o Rust. Ele usa o XChaCha20-Poly1305 do oráculo da agenda, que se calibra contra o rascunho draft-irtf-cfrg-xchacha-03.
+
+## Como é provado
+
+- **Formato (`caixa.rs`):**
+  - tamanhos fixos;
+  - índice: ida e volta; cada um dos 4.157 bytes trocado é recusado; 7 índices em claro fora das regras são recusados;
+  - gaveta:
+    - ida e volta;
+    - não abre com outra chave, nem em outra gaveta, nem vazia;
+    - byte trocado (amostra de 67 posições) é recusado;
+    - texto grande e HMAC de tamanho errado são recusados;
+  - o texto e o remetente não aparecem em claro na gaveta;
+  - vetores conhecidos.
+- **Fluxo (`aparelho.rs`):**
+  - do recebimento à queima: relay entregando de novo; leitura; 59 s não queima, 60 s queima; gaveta sobrescrita; com a chave trocada, nem os bytes antigos de volta abrem; a gaveta volta a servir;
+  - mensagem comum achada pela conversa;
+  - conversa encerrada: `NaoAbre` e a conta sobe;
+  - lida antes de fechar queima ao abrir; não lida sobrevive e abre;
+  - recusas antes de decifrar: outro destinatário, carta estragada, remetente fora da agenda, carta adulterada. Nenhuma anda a conversa;
+  - chegada pendente bloqueia a próxima;
+  - caixa cheia não abre a carta e a aceita depois;
+  - falha de disco ao selar mantém a carta esperando;
+  - texto de 65.536 bytes cabe e o núcleo recusa enviar um byte a mais;
+  - índice adulterado não abre o cofre; cofre sem índice ganha caixa vazia.
+- **Texto no disco:** antes de ler e depois da queima, o texto não aparece em nenhum arquivo da pasta. A busca é a mesma da varredura do cofre, em 8 formas. Ela é calibrada no mesmo teste: o texto gravado em claro é achado.
+- **Calibração (07/11/2026):** sete sabotagens, uma por vez, e cada uma derrubou um teste:
+  - decifrar antes de ver se há gaveta livre;
+  - não sobrescrever na queima;
+  - não gravar "lida" no disco;
+  - queimar só depois de 60 s;
+  - perder a carta quando a selagem falha;
+  - não reconhecer carta repetida;
+  - aceitar carta de outro destinatário.
+
+## O que não resolve
+
+- **O texto passa pela memória e pela tela.** Quem lê a memória do app (root, depurador) vê o texto enquanto ele está aberto. O Dart não garante que as cópias sumiram antes do coletor de lixo passar.
+- **Chave do Keystore restaurada:** se o atacante já tinha uma cópia dos arquivos do Keystore antes da queima, só aparelho com *rollback resistance* impede que ele a use de novo. Ainda não conferi se a API pública deixa pedir isso, nem se o Motorola tem.
+- **Índice antigo no armazenamento:** a troca de nome deixa versões antigas do índice em blocos livres. Com a chave do cofre (PIN + Keystore), elas mostram quantas mensagens havia e em que estado, nunca o texto nem o remetente.
+- **App morto entre decifrar e reservar a gaveta:** a carta se perde. A conversa já andou, e o relay, se entregar de novo, recebe `NaoAbre`.
+- **Gaveta apagada à mão:** a leitura dela falha, e a queima a recria. O índice não confere a existência das gavetas ao abrir.
+- **Ainda não feito:** a ponte para o Dart, o Kotlin das 100 chaves e a tela. São a próxima etapa, junto da medição no Motorola: criar as 100 chaves, selar, ler e queimar, e o tempo de gravação da agenda e da gaveta.

@@ -16,6 +16,11 @@
 //! Conversas (só em memória; documentacao/arquitetura/sessao-olm.md):
 //!   `nova_chave_avulsa` para B publicar; `abrir_conversa` e `cifrar` em A; `receber`
 //!   nos dois lados.
+//! Caixa selada (documentacao/arquitetura/caixa-selada.md), com o cofre aberto:
+//!   `receber_carta` → HMAC no Keystore com a chave da gaveta → `selar_chegada`;
+//!   `caixa` lista; `pedido_de_leitura` → HMAC → `ler`; `queimar_vencidas` (a cada
+//!   segundo) e `queimar_lidas` (ao abrir, ao sair do app e ao apagar a tela) devolvem
+//!   as gavetas cuja chave o Kotlin troca; depois, `chave_trocada`.
 //!
 //! Com o cofre aberto, a chave do cofre fica na memória junto da conta, para regravar
 //! a conta quando ela muda: chave avulsa gerada ou gasta. Regra de ordem: o disco
@@ -29,12 +34,16 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use vodozemac::olm::OlmMessage;
+use kryptos_protocolo::ErroProtocolo;
+use kryptos_protocolo::carta::Carta;
+use sha2::{Digest, Sha256};
+use vodozemac::olm::{IdentityKeys, OlmMessage};
 use zeroize::Zeroizing;
 
 use crate::agenda_gravada;
+use crate::caixa::{self, Estado, Indice, Lugar, TAMANHO_PEDIDO};
 use crate::cartao::CartaoContato;
 use crate::codigo::CodigoContato;
 use crate::cofre::{self, Custo, ErroCofre, Resultado, TAMANHO_CHAVE, TAMANHO_SAL, Varredura};
@@ -59,8 +68,39 @@ struct Memoria {
     identidade: Identidade,
     selo: Option<Selo>,
     agenda: Agenda,
+    /// A caixa selada, só com o cofre aberto.
+    caixa: Option<Caixa>,
     /// Uma conversa por contato, a mais recente. Poucos contatos: busca linear.
     conversas: Vec<(CodigoContato, Sessao)>,
+}
+
+/// O índice da caixa e o que só vive na memória: a chegada à espera do Keystore, a
+/// hora em que cada gaveta foi lida (relógio monotônico) e quantas cartas não abriram
+/// nesta execução.
+struct Caixa {
+    indice: Indice,
+    pendente: Option<Pendente>,
+    lidas_em: Vec<(u8, Instant)>,
+    nao_abertas: u32,
+}
+
+impl Caixa {
+    fn nova(indice: Indice) -> Self {
+        Self {
+            indice,
+            pendente: None,
+            lidas_em: Vec::new(),
+            nao_abertas: 0,
+        }
+    }
+}
+
+/// Carta já decifrada, com a gaveta reservada, esperando o HMAC do Keystore.
+struct Pendente {
+    gaveta: u8,
+    nonce: [u8; 24],
+    remetente: IdentityKeys,
+    texto: Zeroizing<Vec<u8>>,
 }
 
 impl Memoria {
@@ -69,6 +109,7 @@ impl Memoria {
             identidade,
             selo,
             agenda,
+            caixa: None,
             conversas: Vec::new(),
         }
     }
@@ -134,6 +175,27 @@ fn gravar_agenda(
     Ok(())
 }
 
+/// Grava o índice da caixa e prova lendo de volta.
+fn gravar_indice(pasta: &Path, chave: &[u8; TAMANHO_CHAVE], indice: &Indice) -> Resultado<()> {
+    caixa::gravar_indice(pasta, &caixa::selar_indice(indice, chave)?)?;
+    let lido = caixa::ler_indice(pasta)?.ok_or(ErroCofre::CaixaCorrompida)?;
+    if caixa::abrir_indice(&lido, chave)? != *indice {
+        return Err(ErroCofre::CaixaCorrompida);
+    }
+    Ok(())
+}
+
+/// Caixa nova: as 100 gavetas vazias (aleatórias) e o índice vazio, tudo conferido.
+fn criar_caixa(pasta: &Path, chave: &[u8; TAMANHO_CHAVE]) -> Resultado<Indice> {
+    for g in 0..caixa::CAPACIDADE {
+        let g = u8::try_from(g).map_err(|_| ErroCofre::CaixaCorrompida)?;
+        caixa::gravar_gaveta_conferida(pasta, g, &caixa::gaveta_vazia()?)?;
+    }
+    let indice = Indice::vazio();
+    gravar_indice(pasta, chave, &indice)?;
+    Ok(indice)
+}
+
 static IDENTIDADE: Mutex<Option<Memoria>> = Mutex::new(None);
 
 fn trava() -> MutexGuard<'static, Option<Memoria>> {
@@ -156,6 +218,8 @@ pub enum ErroConversa {
     ContatoDesconhecido,
     /// Mensagem comum de um contato sem conversa aberta (o app fechou, por exemplo).
     SemConversa,
+    /// Texto acima de `caixa::MAXIMO_TEXTO`.
+    TextoGrande,
 }
 
 impl ErroConversa {
@@ -167,6 +231,7 @@ impl ErroConversa {
             Self::CofreFechado => "COFRE_FECHADO",
             Self::ContatoDesconhecido => "CONTATO_DESCONHECIDO",
             Self::SemConversa => "SEM_CONVERSA",
+            Self::TextoGrande => "TEXTO_GRANDE",
         }
     }
 }
@@ -288,9 +353,10 @@ fn preparar_pin_novo_com_custo(pin: &[u8], custo: Custo) -> Resultado<PinPrepara
 /// Grava a agenda da memória e a identidade no cofre novo e guarda o selo para
 /// regravar. Recusa se não há identidade ou se o cofre já existe.
 ///
-/// A agenda vai primeiro, mesmo vazia: assim o arquivo existe desde a criação e a
-/// existência dele não diz se há contatos. Se a identidade falhar depois, a agenda que
-/// ficou é sobrescrita na próxima tentativa (sem cofre, nada a lê).
+/// A agenda e a caixa (100 gavetas vazias e o índice) vão primeiro, mesmo vazias:
+/// assim os arquivos existem desde a criação e não dizem se há contatos ou mensagens.
+/// Se a identidade falhar depois, o que ficou é sobrescrito na próxima tentativa (sem
+/// cofre, nada o lê).
 pub fn criar_cofre(pasta: &Path, sal: &[u8], chave_do_cofre: &[u8]) -> Resultado<()> {
     criar_cofre_com_custo(pasta, sal, chave_do_cofre, cofre::CUSTO_PADRAO)
 }
@@ -310,8 +376,10 @@ fn criar_cofre_com_custo(
     let memoria = guarda.as_mut().ok_or(ErroCofre::SemIdentidade)?;
     let proprio = memoria.identidade.chaves_publicas();
     gravar_agenda(pasta, &chave, &memoria.agenda, &proprio)?;
+    let indice = criar_caixa(pasta, &chave)?;
     let arquivo = cofre::selar(&memoria.identidade, &chave, sal, custo)?;
     cofre::gravar_novo(pasta, &arquivo)?;
+    memoria.caixa = Some(Caixa::nova(indice));
     memoria.selo = Some(Selo {
         pasta: pasta.to_path_buf(),
         chave,
@@ -355,6 +423,8 @@ fn preparar_abertura_com(
 ///
 /// Agenda ausente (cofre criado antes da agenda gravada): começa vazia e já é gravada.
 /// Agenda que não abre: `AgendaCorrompida`, nada vai para a memória e nada é apagado.
+/// Caixa: a mesma regra (`CaixaCorrompida`; ausente, criada vazia). As gavetas lidas
+/// antes de fechar queimam no `queimar_lidas`, que o app chama logo depois de abrir.
 /// O PIN estava certo, então as tentativas já foram zeradas.
 pub fn abrir_cofre(pasta: &Path, chave_do_cofre: &[u8]) -> Resultado<CodigoContato> {
     let chave = cofre::chave_de(chave_do_cofre)?;
@@ -371,6 +441,10 @@ pub fn abrir_cofre(pasta: &Path, chave_do_cofre: &[u8]) -> Resultado<CodigoConta
             vazia
         }
     };
+    let indice = match caixa::ler_indice(pasta)? {
+        Some(gravado) => caixa::abrir_indice(&gravado, &chave)?,
+        None => criar_caixa(pasta, &chave)?,
+    };
     let codigo = identidade.codigo_contato();
     let selo = Selo {
         pasta: pasta.to_path_buf(),
@@ -378,7 +452,9 @@ pub fn abrir_cofre(pasta: &Path, chave_do_cofre: &[u8]) -> Resultado<CodigoConta
         sal: cabecalho.sal,
         custo: cabecalho.custo,
     };
-    *trava() = Some(Memoria::nova(identidade, Some(selo), agenda));
+    let mut memoria = Memoria::nova(identidade, Some(selo), agenda);
+    memoria.caixa = Some(Caixa::nova(indice));
+    *trava() = Some(memoria);
     Ok(codigo)
 }
 
@@ -437,8 +513,11 @@ pub fn abrir_conversa(codigo: CodigoContato, avulsa: &ChaveAvulsa) -> Result<(),
     Ok(())
 }
 
-/// Cifra para um contato com conversa aberta.
+/// Cifra para um contato com conversa aberta. Até `caixa::MAXIMO_TEXTO` bytes.
 pub fn cifrar(codigo: CodigoContato, texto: &[u8]) -> Result<OlmMessage, ErroConversa> {
+    if texto.len() > caixa::MAXIMO_TEXTO {
+        return Err(ErroConversa::TextoGrande);
+    }
     let mut guarda = trava();
     let memoria = guarda.as_mut().ok_or(ErroConversa::SemIdentidade)?;
     let sessao = memoria.conversa(codigo).ok_or(ErroConversa::SemConversa)?;
@@ -479,6 +558,444 @@ pub fn receber(
     }
     let sessao = memoria.conversa(codigo).ok_or(ErroConversa::SemConversa)?;
     Ok(sessao.decifrar(mensagem)?)
+}
+
+// ---------------------------------------------------------------- caixa selada
+
+/// Motivo de uma operação da caixa não acontecer. Não carrega texto, chave nem código.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErroCaixa {
+    Cofre(ErroCofre),
+    /// A carta não está no formato (veio estragada): o app confirma e descarta.
+    Carta(ErroProtocolo),
+    SemIdentidade,
+    CofreFechado,
+    /// Já há uma carta esperando o HMAC: termine com `selar_chegada` ou
+    /// `desistir_da_chegada` antes de receber outra.
+    ChegadaPendente,
+    /// `selar_chegada` sem carta esperando.
+    SemChegada,
+    /// Número de gaveta fora de 0..99.
+    GavetaInvalida,
+    /// A gaveta não está no estado que a operação pede (ler uma gaveta livre, por exemplo).
+    Estado,
+}
+
+impl ErroCaixa {
+    pub fn codigo(&self) -> &'static str {
+        match self {
+            Self::Cofre(e) => e.codigo(),
+            Self::Carta(e) => e.codigo(),
+            Self::SemIdentidade => "SEM_IDENTIDADE",
+            Self::CofreFechado => "COFRE_FECHADO",
+            Self::ChegadaPendente => "CAIXA_CHEGADA_PENDENTE",
+            Self::SemChegada => "CAIXA_SEM_CHEGADA",
+            Self::GavetaInvalida => "GAVETA_INVALIDA",
+            Self::Estado => "GAVETA_ESTADO",
+        }
+    }
+}
+
+impl fmt::Display for ErroCaixa {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.codigo())
+    }
+}
+
+impl std::error::Error for ErroCaixa {}
+
+impl From<ErroCofre> for ErroCaixa {
+    fn from(e: ErroCofre) -> Self {
+        Self::Cofre(e)
+    }
+}
+
+/// O que fazer com uma carta que chegou.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Chegada {
+    /// Decifrada e com gaveta reservada: pedir ao Keystore o HMAC de `pedido` com a
+    /// chave da `gaveta` e chamar `selar_chegada`. Só depois confirmar ao relay.
+    Selar {
+        gaveta: u8,
+        pedido: [u8; TAMANHO_PEDIDO],
+    },
+    /// A mesma carta já está numa gaveta (o relay entregou de novo): confirmar.
+    JaGuardada,
+    /// Não abre: conversa encerrada, remetente fora da agenda ou carta adulterada.
+    /// Confirmar ao relay; entra na conta de `nao_abertas`.
+    NaoAbre,
+    /// Para outra pessoa (o rádio ouve todo mundo): ignorar.
+    NaoEParaMim,
+    /// Sem gaveta livre: não confirmar. A carta fica no relay e a conversa não anda.
+    CaixaCheia,
+}
+
+/// Uma mensagem na caixa, sem nada do conteúdo: o remetente só aparece ao ler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemDaCaixa {
+    pub gaveta: u8,
+    /// Ordem de chegada (não é data).
+    pub numero: u64,
+    pub lida: bool,
+}
+
+/// Mensagem aberta para a tela.
+pub struct Lida {
+    pub remetente: CodigoContato,
+    pub texto: Zeroizing<Vec<u8>>,
+}
+
+impl fmt::Debug for Lida {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Lida(oculta)")
+    }
+}
+
+/// Quanto tempo a mensagem lida fica antes de queimar.
+pub const TEMPO_ATE_QUEIMAR: Duration = Duration::from_secs(60);
+
+fn com_caixa<T>(
+    f: impl FnOnce(&mut Memoria, &Selo, &mut Caixa) -> Result<T, ErroCaixa>,
+) -> Result<T, ErroCaixa> {
+    let mut guarda = trava();
+    let memoria = guarda.as_mut().ok_or(ErroCaixa::SemIdentidade)?;
+    let selo = memoria.selo.take().ok_or(ErroCaixa::CofreFechado)?;
+    let Some(mut caixa) = memoria.caixa.take() else {
+        memoria.selo = Some(selo);
+        return Err(ErroCaixa::CofreFechado);
+    };
+    let r = f(memoria, &selo, &mut caixa);
+    memoria.selo = Some(selo);
+    memoria.caixa = Some(caixa);
+    r
+}
+
+fn gaveta_de(numero: u8) -> Result<usize, ErroCaixa> {
+    let g = usize::from(numero);
+    if g >= caixa::CAPACIDADE {
+        return Err(ErroCaixa::GavetaInvalida);
+    }
+    Ok(g)
+}
+
+/// Grava o índice novo e só então troca o da memória.
+fn trocar_indice(selo: &Selo, caixa: &mut Caixa, novo: Indice) -> Result<(), ErroCaixa> {
+    gravar_indice(&selo.pasta, &selo.chave, &novo)?;
+    caixa.indice = novo;
+    Ok(())
+}
+
+/// Quem mandou e o texto.
+type Decifrada = (Contato, Zeroizing<Vec<u8>>);
+
+/// Decifra a mensagem de quem estiver na agenda. `None`: não abre.
+/// Primeira mensagem de conversa nova: abre a conversa e grava a conta (chave avulsa
+/// gasta) antes de devolver o texto, como em `receber`.
+fn decifrar_de_alguem(
+    memoria: &mut Memoria,
+    selo: &Selo,
+    mensagem: &OlmMessage,
+) -> Result<Option<Decifrada>, ErroCaixa> {
+    if let OlmMessage::PreKey(primeira) = mensagem {
+        let quem = primeira.identity_key();
+        let Some(contato) = memoria
+            .agenda
+            .contatos()
+            .iter()
+            .find(|c| c.chaves().curve25519 == quem)
+            .copied()
+        else {
+            return Ok(None);
+        };
+        let codigo = contato.codigo();
+        let ja_aberta = memoria
+            .conversa(codigo)
+            .filter(|s| s.identificador() == primeira.session_id());
+        if let Some(sessao) = ja_aberta {
+            return Ok(sessao.decifrar(mensagem).ok().map(|t| (contato, t)));
+        }
+        let Ok((sessao, texto)) =
+            Sessao::receber_primeira(&mut memoria.identidade, &contato, mensagem)
+        else {
+            return Ok(None);
+        };
+        // A conta mudou (chave avulsa gasta): grava e confere antes de o texto seguir.
+        let arquivo = cofre::selar(&memoria.identidade, &selo.chave, selo.sal, selo.custo)?;
+        cofre::regravar(&selo.pasta, &arquivo)?;
+        let lida = cofre::abrir(&cofre::ler(&selo.pasta)?, &selo.chave)?;
+        if !matches!(lida.mesma_conta_que(&memoria.identidade), Ok(true)) {
+            return Err(ErroCaixa::Cofre(ErroCofre::ArquivoCorrompido));
+        }
+        memoria.guardar_conversa(codigo, sessao);
+        return Ok(Some((contato, texto)));
+    }
+    // Mensagem comum não diz de quem é: tenta cada conversa aberta. O vodozemac só
+    // muda a conversa quando a autenticação da mensagem confere.
+    for (codigo, sessao) in &mut memoria.conversas {
+        if let Ok(texto) = sessao.decifrar(mensagem) {
+            let codigo = *codigo;
+            let contato = memoria.contato(codigo).map_err(|_| ErroCaixa::Estado)?;
+            return Ok(Some((contato, texto)));
+        }
+    }
+    Ok(None)
+}
+
+/// Porta única das cartas, venham do relay ou do modo Direto.
+///
+/// Ordem: confere o destinatário, reconhece carta repetida e procura gaveta livre
+/// ANTES de decifrar. Decifrar anda a conversa, então sem gaveta livre a carta nem é
+/// aberta e pode ser entregue de novo depois.
+pub fn receber_carta(bytes: &[u8]) -> Result<Chegada, ErroCaixa> {
+    let carta = Carta::ler(bytes).map_err(ErroCaixa::Carta)?;
+    com_caixa(|memoria, selo, caixa| {
+        if caixa.pendente.is_some() {
+            return Err(ErroCaixa::ChegadaPendente);
+        }
+        let eu = memoria.identidade.chaves_publicas();
+        if carta.destinatario != *eu.ed25519.as_bytes() {
+            return Ok(Chegada::NaoEParaMim);
+        }
+        let resumo: [u8; 32] = Sha256::digest(bytes).into();
+        let ja = caixa.indice.lugares.iter().any(|l| {
+            matches!(l.estado, Estado::NaoLida | Estado::Lida | Estado::Reservada)
+                && l.resumo == resumo
+        });
+        if ja {
+            return Ok(Chegada::JaGuardada);
+        }
+        let Some(livre) = caixa
+            .indice
+            .lugares
+            .iter()
+            .position(|l| l.estado == Estado::Livre)
+        else {
+            return Ok(Chegada::CaixaCheia);
+        };
+        let gaveta = u8::try_from(livre).map_err(|_| ErroCaixa::GavetaInvalida)?;
+        let tipo = usize::from(carta.tipo.numero());
+        let Ok(mensagem) = crate::sessao::ler_mensagem(tipo, &carta.mensagem) else {
+            caixa.nao_abertas = caixa.nao_abertas.saturating_add(1);
+            return Ok(Chegada::NaoAbre);
+        };
+        let Some((contato, texto)) = decifrar_de_alguem(memoria, selo, &mensagem)? else {
+            caixa.nao_abertas = caixa.nao_abertas.saturating_add(1);
+            return Ok(Chegada::NaoAbre);
+        };
+        if texto.len() > caixa::MAXIMO_TEXTO {
+            caixa.nao_abertas = caixa.nao_abertas.saturating_add(1);
+            return Ok(Chegada::NaoAbre);
+        }
+        // Disco primeiro: a gaveta fica reservada no índice antes de receber a carta.
+        let mut novo = caixa.indice.clone();
+        novo.lugares[livre] = Lugar {
+            estado: Estado::Reservada,
+            numero: novo.proximo,
+            resumo,
+        };
+        novo.proximo += 1;
+        trocar_indice(selo, caixa, novo)?;
+        let nonce: [u8; 24] = cofre::aleatorio()?;
+        caixa.pendente = Some(Pendente {
+            gaveta,
+            nonce,
+            remetente: *contato.chaves(),
+            texto,
+        });
+        Ok(Chegada::Selar {
+            gaveta,
+            pedido: caixa::pedido(gaveta, &nonce),
+        })
+    })
+}
+
+/// Sela a carta que esperava o HMAC, confere lendo de volta e marca como não lida.
+/// Devolve a gaveta. Se falhar, a carta continua esperando: tente de novo ou desista.
+pub fn selar_chegada(hmac: &[u8]) -> Result<u8, ErroCaixa> {
+    com_caixa(|_memoria, selo, caixa| {
+        let p = caixa.pendente.take().ok_or(ErroCaixa::SemChegada)?;
+        let r = (|| -> Result<(), ErroCaixa> {
+            let arquivo = caixa::selar_gaveta(p.gaveta, p.nonce, hmac, &p.remetente, &p.texto)?;
+            caixa::gravar_gaveta_conferida(&selo.pasta, p.gaveta, &arquivo)?;
+            let (r, t) =
+                caixa::abrir_gaveta(p.gaveta, &caixa::ler_gaveta(&selo.pasta, p.gaveta)?, hmac)?;
+            if r != p.remetente || *t != *p.texto {
+                return Err(ErroCaixa::Cofre(ErroCofre::CaixaCorrompida));
+            }
+            let mut novo = caixa.indice.clone();
+            novo.lugares[usize::from(p.gaveta)].estado = Estado::NaoLida;
+            trocar_indice(selo, caixa, novo)
+        })();
+        match r {
+            Ok(()) => Ok(p.gaveta),
+            Err(e) => {
+                caixa.pendente = Some(p);
+                Err(e)
+            }
+        }
+    })
+}
+
+/// Desiste da carta que esperava o HMAC (o Keystore falhou). O texto sai da memória;
+/// a gaveta reservada queima no próximo `queimar_lidas`.
+pub fn desistir_da_chegada() -> Result<(), ErroCaixa> {
+    com_caixa(|_m, _s, caixa| caixa.pendente.take().ok_or(ErroCaixa::SemChegada).map(drop))
+}
+
+/// Mensagens na caixa (não lidas e lidas ainda não queimadas), na ordem de chegada.
+pub fn caixa() -> Result<Vec<ItemDaCaixa>, ErroCaixa> {
+    com_caixa(|_m, _s, caixa| {
+        let mut itens: Vec<ItemDaCaixa> = caixa
+            .indice
+            .lugares
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| matches!(l.estado, Estado::NaoLida | Estado::Lida))
+            .filter_map(|(g, l)| {
+                u8::try_from(g).ok().map(|gaveta| ItemDaCaixa {
+                    gaveta,
+                    numero: l.numero,
+                    lida: l.estado == Estado::Lida,
+                })
+            })
+            .collect();
+        itens.sort_by_key(|i| i.numero);
+        Ok(itens)
+    })
+}
+
+/// Cartas que não abriram nesta execução do app.
+pub fn nao_abertas() -> Result<u32, ErroCaixa> {
+    com_caixa(|_m, _s, caixa| Ok(caixa.nao_abertas))
+}
+
+/// Pedido para o HMAC de leitura de uma gaveta não lida ou lida.
+pub fn pedido_de_leitura(gaveta: u8) -> Result<[u8; TAMANHO_PEDIDO], ErroCaixa> {
+    com_caixa(|_m, selo, caixa| {
+        let g = gaveta_de(gaveta)?;
+        if !matches!(
+            caixa.indice.lugares[g].estado,
+            Estado::NaoLida | Estado::Lida
+        ) {
+            return Err(ErroCaixa::Estado);
+        }
+        let nonce = caixa::nonce_da_gaveta(&caixa::ler_gaveta(&selo.pasta, gaveta)?)?;
+        Ok(caixa::pedido(gaveta, &nonce))
+    })
+}
+
+/// Abre a mensagem para a tela. Na primeira leitura, marca como lida no disco ANTES
+/// de devolver o texto e começa a contar o minuto até a queima.
+pub fn ler(gaveta: u8, hmac: &[u8]) -> Result<Lida, ErroCaixa> {
+    ler_em(gaveta, hmac, Instant::now())
+}
+
+fn ler_em(gaveta: u8, hmac: &[u8], agora: Instant) -> Result<Lida, ErroCaixa> {
+    com_caixa(|_m, selo, caixa| {
+        let g = gaveta_de(gaveta)?;
+        let estado = caixa.indice.lugares[g].estado;
+        if !matches!(estado, Estado::NaoLida | Estado::Lida) {
+            return Err(ErroCaixa::Estado);
+        }
+        let (remetente, texto) =
+            caixa::abrir_gaveta(gaveta, &caixa::ler_gaveta(&selo.pasta, gaveta)?, hmac)?;
+        if estado == Estado::NaoLida {
+            let mut novo = caixa.indice.clone();
+            novo.lugares[g].estado = Estado::Lida;
+            trocar_indice(selo, caixa, novo)?;
+            caixa.lidas_em.push((gaveta, agora));
+        }
+        Ok(Lida {
+            remetente: CodigoContato::de_chaves(&remetente),
+            texto,
+        })
+    })
+}
+
+/// Queima uma gaveta: marca no índice (disco primeiro), sobrescreve com bytes
+/// aleatórios e confere. Falta trocar a chave no Keystore (`chave_trocada`).
+fn queimar(selo: &Selo, caixa: &mut Caixa, gaveta: u8) -> Result<(), ErroCaixa> {
+    let g = gaveta_de(gaveta)?;
+    if caixa.indice.lugares[g].estado != Estado::Queimada {
+        let mut novo = caixa.indice.clone();
+        novo.lugares[g] = Lugar {
+            estado: Estado::Queimada,
+            numero: 0,
+            resumo: [0; 32],
+        };
+        trocar_indice(selo, caixa, novo)?;
+    }
+    caixa::gravar_gaveta_conferida(&selo.pasta, gaveta, &caixa::gaveta_vazia()?)?;
+    caixa.lidas_em.retain(|(x, _)| *x != gaveta);
+    Ok(())
+}
+
+/// Queima as lidas há um minuto ou mais. Devolve as gavetas cuja chave o Kotlin troca.
+pub fn queimar_vencidas() -> Result<Vec<u8>, ErroCaixa> {
+    queimar_vencidas_em(Instant::now())
+}
+
+fn queimar_vencidas_em(agora: Instant) -> Result<Vec<u8>, ErroCaixa> {
+    com_caixa(|_m, selo, caixa| {
+        let vencidas: Vec<u8> = caixa
+            .lidas_em
+            .iter()
+            .filter(|(_, t)| agora.saturating_duration_since(*t) >= TEMPO_ATE_QUEIMAR)
+            .map(|(g, _)| *g)
+            .collect();
+        for g in &vencidas {
+            queimar(selo, caixa, *g)?;
+        }
+        Ok(vencidas)
+    })
+}
+
+/// Queima na hora todas as lidas, as reservadas que nunca foram seladas e termina as
+/// queimas interrompidas. Chamar ao abrir, ao sair do app e ao apagar a tela.
+/// Devolve as gavetas cuja chave o Kotlin troca (inclui as já queimadas que ainda
+/// esperam a troca).
+pub fn queimar_lidas() -> Result<Vec<u8>, ErroCaixa> {
+    com_caixa(|_m, selo, caixa| {
+        let alvo: Vec<u8> = caixa
+            .indice
+            .lugares
+            .iter()
+            .enumerate()
+            .filter(|(g, l)| {
+                let esperando = caixa
+                    .pendente
+                    .as_ref()
+                    .is_some_and(|p| usize::from(p.gaveta) == *g);
+                matches!(l.estado, Estado::Lida | Estado::Queimada)
+                    || (l.estado == Estado::Reservada && !esperando)
+            })
+            .filter_map(|(g, _)| u8::try_from(g).ok())
+            .collect();
+        for g in &alvo {
+            queimar(selo, caixa, *g)?;
+        }
+        Ok(alvo)
+    })
+}
+
+/// O Kotlin trocou a chave da gaveta no Keystore: ela volta a ficar livre.
+pub fn chave_trocada(gaveta: u8) -> Result<(), ErroCaixa> {
+    com_caixa(|_m, selo, caixa| {
+        let g = gaveta_de(gaveta)?;
+        match caixa.indice.lugares[g].estado {
+            Estado::Livre => Ok(()),
+            Estado::Queimada => {
+                let mut novo = caixa.indice.clone();
+                novo.lugares[g] = Lugar {
+                    estado: Estado::Livre,
+                    numero: 0,
+                    resumo: [0; 32],
+                };
+                trocar_indice(selo, caixa, novo)
+            }
+            _ => Err(ErroCaixa::Estado),
+        }
+    })
 }
 
 #[cfg(test)]
@@ -588,7 +1105,7 @@ mod testes {
             let e = preparar_abertura_com(&pasta, b"135790", dormir)?;
             abrir_cofre(&pasta, &keystore_falso(e.as_ref()))?;
             let v = procurar_segredos(&pasta)?;
-            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (3, 0, 0));
+            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (104, 0, 0));
 
             // a agenda volta ao abrir o cofre de novo
             let outro = Identidade::nova().chaves_publicas();
@@ -816,9 +1333,9 @@ mod testes {
             for _ in 0..3 {
                 nova_chave_avulsa()?;
             }
-            // cofre, tentativas e agenda
+            // cofre, tentativas, agenda, índice da caixa e 100 gavetas
             let v = procurar_segredos(pasta)?;
-            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (3, 0, 0));
+            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (104, 0, 0));
             let em_claro = trava()
                 .as_ref()
                 .ok_or("sem identidade")?
@@ -1183,5 +1700,371 @@ mod testes {
         esquecer();
         fs::remove_dir_all(&pasta)?;
         r
+    }
+
+    // ---------- caixa selada ----------
+
+    /// Faz o papel das 100 chaves de gaveta do Keystore: uma chave por gaveta, que
+    /// pode ser trocada. O HMAC é trocado por SHA-256(chave || pedido): basta que seja
+    /// uma função fixa da chave e do pedido.
+    struct KeystoreDasGavetas {
+        chaves: Vec<[u8; 32]>,
+    }
+
+    impl KeystoreDasGavetas {
+        fn novo() -> Self {
+            Self {
+                chaves: (0..caixa::CAPACIDADE)
+                    .map(|i| Sha256::digest(format!("gaveta {i}").as_bytes()).into())
+                    .collect(),
+            }
+        }
+
+        fn hmac(&self, gaveta: u8, pedido: &[u8]) -> Vec<u8> {
+            let mut h = Sha256::new();
+            h.update(self.chaves[usize::from(gaveta)]);
+            h.update(pedido);
+            h.finalize().to_vec()
+        }
+
+        fn trocar(&mut self, gaveta: u8) {
+            let velha = self.chaves[usize::from(gaveta)];
+            self.chaves[usize::from(gaveta)] = Sha256::digest(velha).into();
+        }
+    }
+
+    /// A conversa de A para B (B no aparelho global, com cofre): A leu o QR de B, B leu
+    /// o de A, A abriu a conversa com uma chave avulsa de B.
+    fn a_conversa_com_b() -> Result<(Identidade, Sessao), Box<dyn std::error::Error>> {
+        let avulsa = nova_chave_avulsa()?;
+        let (a, b_para_a) = a_que_leu_o_qr_de_b()?;
+        b_le_o_qr_de(&a)?;
+        let sessao = Sessao::abrir(&a, &b_para_a, &avulsa)?;
+        Ok((a, sessao))
+    }
+
+    fn carta_para_b(m: &OlmMessage) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        use kryptos_protocolo::carta::Tipo;
+        let destinatario = *cartao_proprio()
+            .ok_or("sem identidade")?
+            .chaves()
+            .ed25519
+            .as_bytes();
+        let (tipo, mensagem) = m.to_parts();
+        let tipo = if tipo == crate::sessao::TIPO_PRIMEIRA {
+            Tipo::Primeira
+        } else {
+            Tipo::Normal
+        };
+        Ok(Carta {
+            destinatario,
+            tipo,
+            mensagem,
+        }
+        .codificar()?)
+    }
+
+    /// Recebe e sela pelo caminho do app. Devolve a gaveta.
+    fn chegar(ks: &KeystoreDasGavetas, carta: &[u8]) -> Result<u8, Box<dyn std::error::Error>> {
+        match receber_carta(carta)? {
+            Chegada::Selar { gaveta, pedido } => Ok(selar_chegada(&ks.hmac(gaveta, &pedido))?),
+            outra => Err(format!("esperava Selar, veio {outra:?}").into()),
+        }
+    }
+
+    fn ler_pelo_app(
+        ks: &KeystoreDasGavetas,
+        gaveta: u8,
+        agora: Instant,
+    ) -> Result<Lida, Box<dyn std::error::Error>> {
+        let pedido = pedido_de_leitura(gaveta)?;
+        Ok(ler_em(gaveta, &ks.hmac(gaveta, &pedido), agora)?)
+    }
+
+    /// Quantas vezes o texto aparece nos arquivos da pasta, em qualquer das formas da
+    /// varredura (bytes, hex, base64, lista JSON).
+    fn achados_no_disco(pasta: &Path, texto: &[u8]) -> Result<u32, ErroCofre> {
+        Ok(cofre::procurar(pasta, &[Zeroizing::new(texto.to_vec())])?.ocorrencias)
+    }
+
+    #[test]
+    fn caixa_do_recebimento_a_queima() -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("caixa-ciclo", |pasta| {
+            let mut ks = KeystoreDasGavetas::novo();
+            b_com_cofre(pasta)?;
+            let (a, mut sessao_a) = a_conversa_com_b()?;
+            let texto = b"MENSAGEM-SECRETA-PARA-PROCURAR-NO-DISCO";
+            let carta = carta_para_b(&sessao_a.cifrar(texto)?)?;
+
+            let gaveta = chegar(&ks, &carta)?;
+            assert_eq!(
+                caixa()?,
+                vec![ItemDaCaixa {
+                    gaveta,
+                    numero: 1,
+                    lida: false
+                }]
+            );
+            // selada: o texto não está no disco
+            assert_eq!(achados_no_disco(pasta, texto)?, 0);
+            // o relay entregou de novo: reconhecida, sem gastar gaveta
+            assert_eq!(receber_carta(&carta)?, Chegada::JaGuardada);
+
+            // ler: remetente e texto; marcada como lida no disco
+            let t0 = Instant::now();
+            let lida = ler_pelo_app(&ks, gaveta, t0)?;
+            assert_eq!(lida.remetente, a.codigo_contato());
+            assert_eq!(lida.texto.as_slice(), texto);
+            assert!(caixa()?[0].lida);
+            let antes = caixa::ler_gaveta(pasta, gaveta)?;
+
+            // antes do minuto não queima; no minuto, queima
+            assert!(queimar_vencidas_em(t0 + Duration::from_secs(59))?.is_empty());
+            assert_eq!(queimar_vencidas_em(t0 + TEMPO_ATE_QUEIMAR)?, vec![gaveta]);
+            assert!(caixa()?.is_empty());
+            assert_ne!(
+                caixa::ler_gaveta(pasta, gaveta)?,
+                antes,
+                "gaveta não foi sobrescrita"
+            );
+            assert_eq!(
+                pedido_de_leitura(gaveta).err(),
+                Some(ErroCaixa::Estado),
+                "queimada ainda lê"
+            );
+
+            // o Kotlin troca a chave: mesmo com os bytes antigos de volta, não abre
+            let pedido_velho = caixa::pedido(gaveta, &caixa::nonce_da_gaveta(&antes)?);
+            ks.trocar(gaveta);
+            chave_trocada(gaveta)?;
+            assert_eq!(
+                caixa::abrir_gaveta(gaveta, &antes, &ks.hmac(gaveta, &pedido_velho)).err(),
+                Some(ErroCofre::GavetaNaoAbre)
+            );
+            // depois da queima, o texto não está em lugar nenhum da pasta
+            assert_eq!(achados_no_disco(pasta, texto)?, 0);
+            // calibração da busca: o mesmo texto gravado em claro é achado
+            fs::write(pasta.join("vazamento.txt"), texto)?;
+            assert!(
+                achados_no_disco(pasta, texto)? >= 1,
+                "a busca não acha nem em claro"
+            );
+            fs::remove_file(pasta.join("vazamento.txt"))?;
+
+            // a gaveta volta a servir, com a chave nova
+            let g2 = chegar(&ks, &carta_para_b(&sessao_a.cifrar(b"de novo")?)?)?;
+            assert_eq!(g2, gaveta);
+            assert_eq!(
+                ler_pelo_app(&ks, g2, Instant::now())?.texto.as_slice(),
+                b"de novo"
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn caixa_mensagem_comum_e_conversa_encerrada() -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("caixa-comum", |pasta| {
+            let ks = KeystoreDasGavetas::novo();
+            b_com_cofre(pasta)?;
+            let (a, mut sessao_a) = a_conversa_com_b()?;
+            let g1 = chegar(&ks, &carta_para_b(&sessao_a.cifrar(b"oi")?)?)?;
+            // B responde; A decifra; agora A manda mensagem comum
+            let resposta = cifrar(a.codigo_contato(), b"oi, A")?;
+            assert_eq!(sessao_a.decifrar(&resposta)?.as_slice(), b"oi, A");
+            let comum = sessao_a.cifrar(b"comum")?;
+            assert!(matches!(comum, OlmMessage::Normal(_)));
+            let g2 = chegar(&ks, &carta_para_b(&comum)?)?;
+            assert_eq!(
+                ler_pelo_app(&ks, g2, Instant::now())?.texto.as_slice(),
+                b"comum"
+            );
+
+            // o app fecha: a conversa morre, a caixa fica
+            reabrir(pasta)?;
+            assert_eq!(nao_abertas()?, 0);
+            // a lida antes de fechar queima ao abrir; a não lida continua
+            assert_eq!(queimar_lidas()?, vec![g2]);
+            assert_eq!(
+                caixa()?.iter().map(|i| i.gaveta).collect::<Vec<_>>(),
+                vec![g1]
+            );
+            assert_eq!(
+                ler_pelo_app(&ks, g1, Instant::now())?.texto.as_slice(),
+                b"oi"
+            );
+
+            // mensagem comum de conversa encerrada: não abre, entra na conta
+            let perdida = carta_para_b(&sessao_a.cifrar(b"perdida")?)?;
+            assert_eq!(receber_carta(&perdida)?, Chegada::NaoAbre);
+            assert_eq!(nao_abertas()?, 1);
+            assert_eq!(caixa()?.len(), 1, "carta que não abriu ocupou gaveta");
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn caixa_recusas_antes_de_decifrar() -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("caixa-recusas", |pasta| {
+            let ks = KeystoreDasGavetas::novo();
+            // sem cofre aberto
+            esquecer();
+            assert_eq!(caixa().err(), Some(ErroCaixa::SemIdentidade));
+            gerar_identidade();
+            assert_eq!(caixa().err(), Some(ErroCaixa::CofreFechado));
+
+            b_com_cofre(pasta)?;
+            let (_a, mut sessao_a) = a_conversa_com_b()?;
+            let m = sessao_a.cifrar(b"x")?;
+            // para outra pessoa
+            let mut outra = carta_para_b(&m)?;
+            outra[1] ^= 1;
+            assert_eq!(receber_carta(&outra)?, Chegada::NaoEParaMim);
+            // estragada
+            assert!(matches!(
+                receber_carta(&[1, 2, 3]),
+                Err(ErroCaixa::Carta(_))
+            ));
+            // remetente fora da agenda (primeira mensagem de quem não está nela)
+            let (estranho, b_para_estranho) = a_que_leu_o_qr_de_b()?;
+            let avulsa = nova_chave_avulsa()?;
+            let de_estranho = Sessao::abrir(&estranho, &b_para_estranho, &avulsa)?.cifrar(b"?")?;
+            assert_eq!(
+                receber_carta(&carta_para_b(&de_estranho)?)?,
+                Chegada::NaoAbre
+            );
+            // adulterada: último byte da mensagem
+            let mut adulterada = carta_para_b(&m)?;
+            let fim = adulterada.len() - 1;
+            adulterada[fim] ^= 1;
+            assert_eq!(receber_carta(&adulterada)?, Chegada::NaoAbre);
+            assert_eq!(nao_abertas()?, 2);
+            // a original continua abrindo: as recusas não andaram a conversa
+            chegar(&ks, &carta_para_b(&m)?)?;
+            // chegada pendente bloqueia a próxima
+            let m2 = carta_para_b(&sessao_a.cifrar(b"y")?)?;
+            assert!(matches!(receber_carta(&m2)?, Chegada::Selar { .. }));
+            let m3 = carta_para_b(&sessao_a.cifrar(b"z")?)?;
+            assert_eq!(receber_carta(&m3).err(), Some(ErroCaixa::ChegadaPendente));
+            desistir_da_chegada()?;
+            assert_eq!(selar_chegada(&[0u8; 32]).err(), Some(ErroCaixa::SemChegada));
+            // a reservada que desistiu queima no queimar_lidas
+            assert_eq!(queimar_lidas()?.len(), 1);
+            assert_eq!(
+                pedido_de_leitura(200).err(),
+                Some(ErroCaixa::GavetaInvalida)
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn caixa_cheia_nao_abre_a_carta_e_aceita_depois() -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("caixa-cheia", |pasta| {
+            let mut ks = KeystoreDasGavetas::novo();
+            b_com_cofre(pasta)?;
+            let (_a, mut sessao_a) = a_conversa_com_b()?;
+            for i in 0..caixa::CAPACIDADE {
+                chegar(
+                    &ks,
+                    &carta_para_b(&sessao_a.cifrar(format!("m{i}").as_bytes())?)?,
+                )?;
+            }
+            let carta = carta_para_b(&sessao_a.cifrar(b"a 101")?)?;
+            assert_eq!(receber_carta(&carta)?, Chegada::CaixaCheia);
+            assert_eq!(nao_abertas()?, 0);
+            // libera uma gaveta: ler, queimar, trocar a chave
+            let g = caixa()?[0].gaveta;
+            ler_pelo_app(&ks, g, Instant::now())?;
+            assert_eq!(queimar_lidas()?, vec![g]);
+            ks.trocar(g);
+            chave_trocada(g)?;
+            // a mesma carta agora entra: a recusa por caixa cheia não a abriu
+            let g2 = chegar(&ks, &carta)?;
+            assert_eq!(
+                ler_pelo_app(&ks, g2, Instant::now())?.texto.as_slice(),
+                b"a 101"
+            );
+            assert_eq!(fs::read_dir(pasta)?.count(), 104);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn caixa_falha_ao_selar_mantem_a_carta_esperando() -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("caixa-falha", |pasta| {
+            let ks = KeystoreDasGavetas::novo();
+            b_com_cofre(pasta)?;
+            let (_a, mut sessao_a) = a_conversa_com_b()?;
+            let Chegada::Selar { gaveta, pedido } =
+                receber_carta(&carta_para_b(&sessao_a.cifrar(b"guardar")?)?)?
+            else {
+                return Err("esperava Selar".into());
+            };
+            let nome = pasta.join(caixa::nome_gaveta(gaveta));
+            let vazia = fs::read(&nome)?;
+            fs::remove_file(&nome)?;
+            fs::create_dir(&nome)?;
+            assert!(matches!(
+                selar_chegada(&ks.hmac(gaveta, &pedido)),
+                Err(ErroCaixa::Cofre(ErroCofre::Disco(_)))
+            ));
+            assert!(caixa()?.is_empty(), "entrou sem gravar");
+            fs::remove_dir(&nome)?;
+            fs::write(&nome, &vazia)?;
+            assert_eq!(selar_chegada(&ks.hmac(gaveta, &pedido))?, gaveta);
+            assert_eq!(
+                ler_pelo_app(&ks, gaveta, Instant::now())?.texto.as_slice(),
+                b"guardar"
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn caixa_maior_texto_cabe_e_o_seguinte_e_recusado() -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("caixa-maior", |pasta| {
+            let ks = KeystoreDasGavetas::novo();
+            b_com_cofre(pasta)?;
+            let (a, mut sessao_a) = a_conversa_com_b()?;
+            let grande = vec![b'k'; caixa::MAXIMO_TEXTO];
+            let carta = carta_para_b(&sessao_a.cifrar(&grande)?)?;
+            let g = chegar(&ks, &carta)?;
+            assert_eq!(
+                ler_pelo_app(&ks, g, Instant::now())?.texto.as_slice(),
+                grande.as_slice()
+            );
+            // do lado de quem manda, o núcleo recusa um byte a mais
+            let resposta = cifrar(a.codigo_contato(), b"ok")?;
+            sessao_a.decifrar(&resposta)?;
+            assert_eq!(
+                cifrar(a.codigo_contato(), &vec![0u8; caixa::MAXIMO_TEXTO + 1]).err(),
+                Some(ErroConversa::TextoGrande)
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn caixa_indice_adulterado_nao_abre_o_cofre() -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("caixa-adulterada", |pasta| {
+            b_com_cofre(pasta)?;
+            let mut indice = caixa::ler_indice(pasta)?.ok_or("sem índice")?;
+            indice[100] ^= 1;
+            fs::write(pasta.join(caixa::NOME_INDICE), &indice)?;
+            esquecer();
+            let e = preparar_abertura_com(pasta, PIN, |_| {})?;
+            assert_eq!(
+                abrir_cofre(pasta, &keystore_falso(e.as_ref())).err(),
+                Some(ErroCofre::CaixaCorrompida)
+            );
+            assert_eq!(codigo_atual(), None);
+            // cofre de antes da caixa (sem índice): abre com a caixa nova, vazia
+            fs::remove_file(pasta.join(caixa::NOME_INDICE))?;
+            reabrir(pasta)?;
+            assert!(caixa()?.is_empty());
+            assert!(caixa::ler_indice(pasta)?.is_some());
+            Ok(())
+        })
     }
 }

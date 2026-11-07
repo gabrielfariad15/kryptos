@@ -40,6 +40,8 @@ Pasta: `noBackupFilesDir` do app (fora de qualquer backup). O app também tem `a
 
 `agenda.kryptos`: a agenda de contatos, cifrada com uma chave tirada da mesma chave do cofre e com tamanho fixo (`agenda-gravada.md`).
 
+`caixa.kryptos` e `gaveta-00.kryptos` a `gaveta-99.kryptos`: a caixa selada das mensagens recebidas (`caixa-selada.md`).
+
 `tentativas`: falhas seguidas, em texto. A tentativa é registrada antes da conferência, então fechar o app no meio não apaga o erro. Acerto zera.
 
 Gravação: arquivo temporário, `fsync`, troca de nome e `fsync` da pasta. App fechado no meio não deixa cofre pela metade. O temporário só tem o que já está cifrado.

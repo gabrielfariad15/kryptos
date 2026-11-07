@@ -106,6 +106,14 @@ pub enum ErroCofre {
     /// fora do formato: arquivo alterado ou danificado.
     AgendaCorrompida,
     AgendaVersaoDesconhecida,
+    /// O índice da caixa não abre com a chave do cofre, ou abre fora do formato.
+    CaixaCorrompida,
+    CaixaVersaoDesconhecida,
+    /// A gaveta não abre com a chave do Keystore: chave já trocada (queimada), gaveta
+    /// vazia ou alterada.
+    GavetaNaoAbre,
+    /// Texto acima de `caixa::MAXIMO_TEXTO`.
+    TextoGrande,
 }
 
 impl ErroCofre {
@@ -126,6 +134,10 @@ impl ErroCofre {
             Self::Argon2 => "ARGON2",
             Self::AgendaCorrompida => "AGENDA_CORROMPIDA",
             Self::AgendaVersaoDesconhecida => "AGENDA_VERSAO_DESCONHECIDA",
+            Self::CaixaCorrompida => "CAIXA_CORROMPIDA",
+            Self::CaixaVersaoDesconhecida => "CAIXA_VERSAO_DESCONHECIDA",
+            Self::GavetaNaoAbre => "GAVETA_NAO_ABRE",
+            Self::TextoGrande => "TEXTO_GRANDE",
         }
     }
 }
@@ -354,7 +366,7 @@ pub fn existe(pasta: &Path) -> bool {
 
 /// Grava em arquivo temporário e troca de uma vez: app fechado no meio não deixa o
 /// cofre pela metade. O temporário só tem o que vai no arquivo final (já cifrado).
-fn gravar_atomico(pasta: &Path, nome: &str, conteudo: &[u8]) -> Resultado<()> {
+pub(crate) fn gravar_atomico(pasta: &Path, nome: &str, conteudo: &[u8]) -> Resultado<()> {
     fs::create_dir_all(pasta)?;
     let final_ = pasta.join(nome);
     let temp = pasta.join(format!("{nome}.novo"));
@@ -461,11 +473,13 @@ pub fn gravar_tentativas(pasta: &Path, falhas: u32) -> Resultado<()> {
     gravar_atomico(pasta, NOME_TENTATIVAS, falhas.to_string().as_bytes())
 }
 
-/// Apaga cofre, contador e agenda. Usado pelo teste no aparelho e, adiante, pelo
-/// "apagar tudo". Sem a chave do Keystore, que o Kotlin apaga: é ela que deixa ilegível
-/// o que sobrar no armazenamento depois de apagado.
+/// Apaga caixa, agenda, cofre e contador. Usado pelo teste no aparelho e, adiante,
+/// pelo "apagar tudo". Sem as chaves do Keystore, que o Kotlin apaga: são elas que
+/// deixam ilegível o que sobrar no armazenamento depois de apagado.
 pub fn apagar(pasta: &Path) -> Resultado<()> {
-    for nome in [NOME_AGENDA, NOME_COFRE, NOME_TENTATIVAS] {
+    let mut nomes = crate::caixa::nomes();
+    nomes.extend([NOME_AGENDA, NOME_COFRE, NOME_TENTATIVAS].map(String::from));
+    for nome in nomes {
         match fs::remove_file(pasta.join(nome)) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
