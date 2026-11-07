@@ -20,23 +20,13 @@ A escreve primeiro para B.
 
 ## Por onde a chave avulsa chega (decidido em 07/11/2026)
 
-O caminho escolhido é o **servidor de repasse**, com um estoque de chaves avulsas assinadas e uma chave reserva assinada. O QR continua na versão 1, só com a identidade. É o modelo do Signal (X3DH: pré-chaves publicadas no servidor, entregues uma vez e apagadas) e do Matrix (chaves de uso único e chave reserva, MSC2732).
+O caminho escolhido é o **servidor de repasse**, com um estoque de chaves avulsas assinadas e **sem chave reserva**. O QR continua na versão 1, só com a identidade. O modelo vem do Signal (X3DH: pré-chaves publicadas no servidor, entregues uma vez e apagadas), sem a pré-chave de médio prazo: uma mensagem feita com uma chave que não se gasta poderia ser repetida e reaparecer depois de queimada.
 
 - Só o servidor cobre B fora do ar, o contato por código à distância e a reabertura de uma conversa perdida. O QR só cobre o primeiro encontro.
 - O servidor não consegue trocar a chave: A confere a assinatura com a Ed25519 lida no QR.
 - Pôr a chave no QR quase dobraria o texto e exigiria medir a leitura de novo.
 
-O que essa escolha exige:
-
-- **Feito:** a conta com as chaves avulsas fica gravada no cofre (abaixo).
-- **Falta, no servidor:**
-  - publicar o estoque e a chave reserva, com o envio assinado pela Ed25519 do dono;
-  - entregar cada chave uma vez só;
-  - limitar as retiradas, para ninguém esgotar o estoque de propósito.
-- **Falta, no aparelho:**
-  - recusar uma primeira mensagem cuja conversa já existe;
-  - trocar a chave reserva a cada reposição. O Matrix avisa que uma mensagem feita com a chave reserva pode ser repetida enquanto a chave estiver ativa.
-- **Limite que fica:** o servidor sabe quem pediu a chave de quem, até existir o roteamento em camadas.
+Formato, rotas, limites e o que não resolve: `documentacao/arquitetura/estoque-de-chaves.md`.
 
 ## Chaves avulsas no cofre
 
@@ -109,7 +99,7 @@ O Olm confere o MAC sobre a mensagem **recodificada**, e não sobre os bytes que
 
 ## O que ainda não resolve
 
-- A parte do servidor: estoque, chave reserva e limite de retirada.
+- A chamada ao relay a partir do app (ponte, rede e TLS).
 - Ponte, tela e prova no aparelho (regra 5.5). Este passo prova o protocolo com as duas contas no mesmo processo, e não a troca entre os dois celulares.
 - A conversa fica só em memória. Depois de reabrir o app, as mensagens comuns de uma conversa anterior são recusadas (`SEM_CONVERSA`). Gravar as conversas no cofre é assunto próprio.
 - Com o cofre aberto, a chave do cofre fica na memória junto da conta, para regravar. Quem lê a memória do app já lê a conta, então isso acrescenta pouco, mas está registrado.

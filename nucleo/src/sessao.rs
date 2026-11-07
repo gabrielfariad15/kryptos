@@ -78,6 +78,8 @@ pub enum ErroSessao {
     JaUsada,
     /// Mensagens demais puladas na mesma cadeia.
     SaltoGrande,
+    /// Publicação com mais chaves que o protocolo aceita.
+    DemaisChaves,
 }
 
 impl ErroSessao {
@@ -95,6 +97,7 @@ impl ErroSessao {
             Self::Adulterada => "SESSAO_ADULTERADA",
             Self::JaUsada => "SESSAO_JA_USADA",
             Self::SaltoGrande => "SESSAO_SALTO_GRANDE",
+            Self::DemaisChaves => "SESSAO_DEMAIS_CHAVES",
         }
     }
 
@@ -161,6 +164,14 @@ impl ChaveAvulsa {
         })
     }
 
+    /// Lê a chave que o relay entregou numa retirada (`kryptos_protocolo`, 96 bytes).
+    /// A assinatura é conferida em `Sessao::abrir`, contra o contato.
+    pub fn da_retirada(bytes: &[u8]) -> Result<Self, ErroSessao> {
+        let k =
+            kryptos_protocolo::ChaveAssinada::de_bytes(bytes).map_err(|_| ErroSessao::Formato)?;
+        Self::de_partes(k.chave, &k.assinatura)
+    }
+
     pub fn chave_bytes(&self) -> [u8; 32] {
         self.chave.to_bytes()
     }
@@ -207,6 +218,35 @@ impl Identidade {
         let assinatura = conta.sign(ChaveAvulsa::assinado(&chave));
         conta.mark_keys_as_published();
         Ok(ChaveAvulsa { chave, assinatura })
+    }
+}
+
+impl Identidade {
+    /// Gera `quantas` chaves avulsas e monta a publicação assinada para o relay
+    /// (`kryptos_protocolo`), com o `numero` que o relay espera (maior que o último que
+    /// ele aceitou deste dono). Com 0 chaves, a publicação só consulta o estoque.
+    pub fn publicacao(&mut self, quantas: usize, numero: u64) -> Result<Vec<u8>, ErroSessao> {
+        if quantas > kryptos_protocolo::MAXIMO_POR_PUBLICACAO {
+            return Err(ErroSessao::DemaisChaves);
+        }
+        let mut chaves = Vec::with_capacity(quantas);
+        for _ in 0..quantas {
+            let k = self.nova_chave_avulsa()?;
+            chaves.push(kryptos_protocolo::ChaveAssinada {
+                chave: k.chave_bytes(),
+                assinatura: k.assinatura_bytes(),
+            });
+        }
+        let p = kryptos_protocolo::Publicacao {
+            dono: *self.chaves_publicas().ed25519.as_bytes(),
+            numero,
+            chaves,
+        };
+        let assinatura = self
+            .conta()
+            .sign(p.para_assinar().map_err(|_| ErroSessao::DemaisChaves)?);
+        p.codificar(&assinatura.to_bytes())
+            .map_err(|_| ErroSessao::DemaisChaves)
     }
 }
 
@@ -876,6 +916,7 @@ mod testes {
             ErroSessao::Adulterada,
             ErroSessao::JaUsada,
             ErroSessao::SaltoGrande,
+            ErroSessao::DemaisChaves,
         ]
         .map(|e| e.codigo());
         let mut unicos = todos.to_vec();
@@ -913,6 +954,55 @@ mod testes {
             }
         }
         Ok(())
+    }
+
+    // ---------- publicação para o relay (kryptos_protocolo) ----------
+
+    #[test]
+    fn publicacao_confere_e_cada_chave_abre_conversa() -> R {
+        let mut p = par()?;
+        let bytes = p.b.publicacao(3, 42)?;
+        let publicada = kryptos_protocolo::Publicacao::conferir(&bytes)?;
+        assert_eq!(publicada.numero, 42);
+        assert_eq!(&publicada.dono, p.b.chaves_publicas().ed25519.as_bytes());
+        assert_eq!(publicada.chaves.len(), 3);
+        for k in &publicada.chaves {
+            // Como o relay entrega: 96 bytes.
+            let avulsa = ChaveAvulsa::da_retirada(&k.para_bytes())?;
+            let m = Sessao::abrir(&p.a, &p.b_para_a, &avulsa)?.cifrar(b"pelo relay")?;
+            let (_, lido) = Sessao::receber_primeira(&mut p.b, &p.a_para_b, &m)?;
+            assert_eq!(lido.as_slice(), b"pelo relay");
+        }
+        // Consulta: nenhuma chave nova.
+        let antes = p.b.segredos_para_varredura()?.len();
+        let consulta = kryptos_protocolo::Publicacao::conferir(&p.b.publicacao(0, 43)?)?;
+        assert!(consulta.chaves.is_empty());
+        assert_eq!(p.b.segredos_para_varredura()?.len(), antes);
+        Ok(())
+    }
+
+    #[test]
+    fn publicacao_grande_demais_nao_gera_chave() -> R {
+        let mut b = Identidade::nova();
+        let antes = b.segredos_para_varredura()?.len();
+        assert_eq!(
+            b.publicacao(kryptos_protocolo::MAXIMO_POR_PUBLICACAO + 1, 1)
+                .err(),
+            Some(ErroSessao::DemaisChaves)
+        );
+        assert_eq!(b.segredos_para_varredura()?.len(), antes);
+        b.publicacao(kryptos_protocolo::MAXIMO_POR_PUBLICACAO, 1)?;
+        Ok(())
+    }
+
+    #[test]
+    fn retirada_fora_do_tamanho_e_recusada() {
+        for n in [0usize, 95, 97] {
+            assert_eq!(
+                ChaveAvulsa::da_retirada(&vec![0; n]).err(),
+                Some(ErroSessao::Formato)
+            );
+        }
     }
 
     #[test]

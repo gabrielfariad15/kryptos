@@ -10,6 +10,7 @@ publish.workspace = true
 path = "src/lib.rs"
 
 [dependencies]
+kryptos_protocolo.workspace = true
 vodozemac.workspace = true
 sha2.workspace = true
 argon2.workspace = true

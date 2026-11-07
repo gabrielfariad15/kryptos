@@ -368,6 +368,21 @@ pub fn nova_chave_avulsa() -> Result<ChaveAvulsa, ErroConversa> {
     Ok(avulsa)
 }
 
+/// Gera `quantas` chaves avulsas, grava a conta no cofre e só então devolve a
+/// publicação assinada para o relay. Com 0, só consulta o estoque. `numero` tem de ser
+/// maior que o último que o relay aceitou deste aparelho; se não for, o relay responde
+/// `NUMERO_VELHO <último>` e a publicação é refeita com o seguinte.
+pub fn preparar_publicacao(quantas: usize, numero: u64) -> Result<Vec<u8>, ErroConversa> {
+    let mut guarda = trava();
+    let memoria = guarda.as_mut().ok_or(ErroConversa::SemIdentidade)?;
+    if memoria.selo.is_none() {
+        return Err(ErroConversa::CofreFechado);
+    }
+    let publicacao = memoria.identidade.publicacao(quantas, numero)?;
+    memoria.regravar()?;
+    Ok(publicacao)
+}
+
 /// A abre a conversa com um contato da agenda, com a chave avulsa dele. Substitui a
 /// conversa anterior com o mesmo contato, se houver.
 pub fn abrir_conversa(codigo: CodigoContato, avulsa: &ChaveAvulsa) -> Result<(), ErroConversa> {
@@ -913,6 +928,33 @@ mod testes {
         })();
         fs::remove_dir_all(&pasta)?;
         r
+    }
+
+    /// As chaves da publicação sobrevivem a fechar o app antes de alguém retirá-las.
+    #[test]
+    fn chaves_publicadas_sobrevivem_a_fechar() -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("publicacao", |pasta| {
+            esquecer();
+            gerar_identidade();
+            assert_eq!(
+                preparar_publicacao(1, 1).err(),
+                Some(ErroConversa::CofreFechado)
+            );
+            b_com_cofre(pasta)?;
+            let bytes = preparar_publicacao(2, 1)?;
+            let publicada = kryptos_protocolo::Publicacao::conferir(&bytes)?;
+            assert_eq!(publicada.chaves.len(), 2);
+            reabrir(pasta)?;
+            let (a, b_para_a) = a_que_leu_o_qr_de_b()?;
+            let codigo_a = b_le_o_qr_de(&a)?;
+            for (i, k) in publicada.chaves.iter().enumerate() {
+                let avulsa = ChaveAvulsa::da_retirada(&k.para_bytes())?;
+                let texto = format!("mensagem {i}");
+                let m = Sessao::abrir(&a, &b_para_a, &avulsa)?.cifrar(texto.as_bytes())?;
+                assert_eq!(receber(codigo_a, &m)?.as_slice(), texto.as_bytes());
+            }
+            Ok(())
+        })
     }
 
     #[test]

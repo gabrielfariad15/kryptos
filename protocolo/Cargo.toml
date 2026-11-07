@@ -1,0 +1,16 @@
+[package]
+name = "kryptos_protocolo"
+description = "Formato das mensagens entre o app e o relay do Kryptos: publicacao e retirada de chaves avulsas"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+vodozemac.workspace = true
+
+[lints]
+workspace = true

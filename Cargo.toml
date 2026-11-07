@@ -1,11 +1,12 @@
 # Workspace Rust do Kryptos: um Cargo.lock e um target/ para tudo.
 # Membros:
 #   nucleo              motor do app (roda no aparelho)
+#   protocolo           formato das mensagens entre o app e o relay (usado pelos dois)
 #   backend/relay       servidor de repasse
 #   frontend/app/rust   ponte fina entre o Flutter e o nucleo (flutter_rust_bridge)
 [workspace]
 resolver = "3"
-members = ["nucleo", "backend/relay", "frontend/app/rust"]
+members = ["nucleo", "protocolo", "backend/relay", "frontend/app/rust"]
 
 [workspace.package]
 version = "0.1.0"
@@ -16,6 +17,7 @@ publish = false
 # Versoes registradas em documentacao/DEPENDENCIAS.md (regra 8.6).
 [workspace.dependencies]
 kryptos_nucleo = { path = "nucleo" }
+kryptos_protocolo = { path = "protocolo" }
 # Exata: troca de versao da criptografia e decisao, nao efeito colateral de cargo update.
 # Sem os padroes: "libolm-compat" (importar conta do libolm) nao tem uso aqui.
 vodozemac = { version = "=0.11.2", default-features = false, features = ["precomputed-tables"] }
@@ -54,6 +56,13 @@ opt-level = 3
 # Leitor de QR otimizado tambem no debug: roda em cada quadro da camera, e sem isso o
 # tempo medido no celular em desenvolvimento nao seria o do app de verdade.
 [profile.dev.package.rxing]
+opt-level = 3
+
+# Curva do Ed25519 e do X25519 otimizada tambem no debug. Medido em 07/11/2026, no
+# computador: testes do protocolo (2.392 conferencias de assinatura) de 23,17 s para
+# 0,19 s; testes do nucleo de 5,74 s para 4,57 s. No celular em desenvolvimento, a
+# criptografia fica mais perto da do app de verdade.
+[profile.dev.package.curve25519-dalek]
 opt-level = 3
 
 [workspace.lints.rust]

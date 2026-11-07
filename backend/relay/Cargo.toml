@@ -14,12 +14,15 @@ name = "kryptos_relay"
 path = "src/main.rs"
 
 [dependencies]
+kryptos_protocolo.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# Só nos testes: o caminho inteiro, do dono que publica a quem abre a conversa.
+kryptos_nucleo.workspace = true
 tower.workspace = true
 http-body-util.workspace = true
 

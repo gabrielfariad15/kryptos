@@ -1035,6 +1035,7 @@ dependencies = [
  "base64",
  "getrandom",
  "hkdf",
+ "kryptos_protocolo",
  "qrcode",
  "rxing",
  "serde",
@@ -1055,11 +1056,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kryptos_protocolo"
+version = "0.1.0"
+dependencies = [
+ "vodozemac",
+]
+
+[[package]]
 name = "kryptos_relay"
 version = "0.1.0"
 dependencies = [
  "axum",
  "http-body-util",
+ "kryptos_nucleo",
+ "kryptos_protocolo",
  "tokio",
  "tower",
  "tracing",
