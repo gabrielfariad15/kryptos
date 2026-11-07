@@ -1033,6 +1033,7 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "base64",
+ "chacha20poly1305",
  "getrandom",
  "hkdf",
  "kryptos_protocolo",

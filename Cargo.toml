@@ -26,6 +26,10 @@ sha2 = "0.11.0"
 # Crates novos na arvore: argon2 e blake2 (medido com cargo tree); os outros ja vinham pelo vodozemac.
 argon2 = { version = "=0.6.0", default-features = false, features = ["alloc", "zeroize"] }
 hkdf = "0.13.0"
+# Agenda gravada (documentacao/arquitetura/agenda-gravada.md): XChaCha20-Poly1305.
+# Ja vinha pelo vodozemac (hpke); exata como a outra criptografia. Sem os padroes: o
+# nonce vem do getrandom do proprio nucleo, nao do recurso getrandom do aead.
+chacha20poly1305 = { version = "=0.11.0", default-features = false, features = ["alloc", "zeroize"] }
 zeroize = "1.9.1"
 getrandom = "0.4.3"
 serde = { version = "1.0.229", features = ["derive"] }

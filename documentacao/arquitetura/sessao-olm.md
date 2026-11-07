@@ -6,7 +6,7 @@ Decidido em 07/11/2026. Código: `nucleo/src/sessao.rs` (protocolo) e `nucleo/sr
 
 É o canal cifrado entre dois contatos que leram o QR um do outro. Usa a sessão Olm do vodozemac (Double Ratchet): cada mensagem tem chave própria, e a chave muda a cada troca de sentido da conversa.
 
-A sessão fica só em memória, como a agenda. Quando o app fecha, a sessão some.
+A sessão fica só em memória. Quando o app fecha, a sessão some. A agenda, não: ela é gravada cifrada (`agenda-gravada.md`).
 
 ## Como abre
 

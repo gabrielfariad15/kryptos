@@ -56,7 +56,7 @@ Calculado por `ferramentas/oraculos/cartao.py`, só com a biblioteca padrão do 
 
 ## Agenda (nucleo/src/contatos.rs)
 
-O cartão lido entra na agenda desta execução do app, conferido por QR. A agenda fica só em memória: some quando o app fecha e também quando o cofre é aberto de novo. Guardar em disco, cifrado, é assunto próprio.
+O cartão lido entra na agenda, conferido por QR. Com o cofre aberto, a agenda é gravada cifrada antes de o contato aparecer, e volta quando o app abre de novo (`agenda-gravada.md`, decisão de 07/11/2026). Cabem 5.000 contatos; o seguinte é recusado com `AGENDA_CHEIA`.
 
 | Código | Quando |
 |---|---|

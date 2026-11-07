@@ -1,6 +1,6 @@
-//! Agenda de contatos desta execução do app. Fica só em memória e some quando o app
-//! fecha (decisão de 07/11/2026). Guardar cifrado em disco mexe no formato do cofre e
-//! é assunto próprio.
+//! Agenda de contatos. Na memória fica esta lista; no disco, a mesma lista cifrada com a
+//! chave do cofre, em tamanho fixo (`agenda_gravada`, decisão de 07/11/2026 que
+//! substituiu a agenda só em memória). Cabem `MAXIMO_CONTATOS`.
 //!
 //! Um contato entra por um cartão lido do QR. A agenda recusa:
 //! - o próprio cartão;
@@ -14,7 +14,12 @@ use vodozemac::olm::IdentityKeys;
 
 use crate::cartao::{CartaoContato, ErroCartao};
 use crate::codigo::CodigoContato;
+use crate::cofre::ErroCofre;
 use crate::qr::ErroQr;
+
+/// Quantos contatos cabem. A agenda gravada reserva lugar para todos, então o arquivo
+/// tem o mesmo tamanho com 0 ou com 5.000 contatos (decisão de 07/11/2026).
+pub const MAXIMO_CONTATOS: usize = 5_000;
 
 /// Como a chave do contato foi conferida.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +78,10 @@ pub enum ErroAgenda {
     SemIdentidade,
     /// O quadro da câmera não pôde ser lido (tamanho errado ou pânico do leitor).
     Quadro(ErroQr),
+    /// Já há `MAXIMO_CONTATOS` contatos.
+    Cheia,
+    /// A agenda nova não foi gravada (ou não voltou igual ao ler): o contato não entrou.
+    Gravacao(ErroCofre),
 }
 
 impl ErroAgenda {
@@ -83,6 +92,8 @@ impl ErroAgenda {
             Self::Conflito => "QR_CONFLITO",
             Self::SemIdentidade => "SEM_IDENTIDADE",
             Self::Quadro(e) => e.codigo(),
+            Self::Cheia => "AGENDA_CHEIA",
+            Self::Gravacao(e) => e.codigo(),
         }
     }
 }
@@ -107,7 +118,7 @@ impl From<ErroCartao> for ErroAgenda {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Agenda {
     contatos: Vec<Contato>,
 }
@@ -133,7 +144,17 @@ impl Agenda {
         texto: &str,
         proprio: &IdentityKeys,
     ) -> Result<Adicao, ErroAgenda> {
-        let novo = Contato::conferido_por_qr(CartaoContato::ler(texto)?);
+        self.adicionar_conferido_por_qr(CartaoContato::ler(texto)?, proprio)
+    }
+
+    /// Põe o contato de um cartão já lido, conferido por QR. Mesmas recusas da leitura
+    /// do QR; a agenda gravada usa ao abrir, para o arquivo passar pelas mesmas regras.
+    pub(crate) fn adicionar_conferido_por_qr(
+        &mut self,
+        cartao: CartaoContato,
+        proprio: &IdentityKeys,
+    ) -> Result<Adicao, ErroAgenda> {
+        let novo = Contato::conferido_por_qr(cartao);
         let eu = Contato::conferido_por_qr(CartaoContato::de_chaves(proprio));
         if novo.chaves() == eu.chaves() {
             return Err(ErroAgenda::Proprio);
@@ -148,6 +169,9 @@ impl Agenda {
             if em_conflito(&novo, existente) {
                 return Err(ErroAgenda::Conflito);
             }
+        }
+        if self.contatos.len() >= MAXIMO_CONTATOS {
+            return Err(ErroAgenda::Cheia);
         }
         self.contatos.push(novo);
         Ok(Adicao::Novo(novo.codigo))
@@ -333,6 +357,7 @@ mod testes {
             ErroAgenda::Quadro(ErroQr::QuadroInvalido).codigo(),
             ErroAgenda::Quadro(ErroQr::Geracao).codigo(),
             ErroAgenda::Quadro(ErroQr::Leitor).codigo(),
+            ErroAgenda::Cheia.codigo(),
         ];
         let mut unicos = todos.to_vec();
         unicos.sort_unstable();

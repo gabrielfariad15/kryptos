@@ -3,7 +3,8 @@
 //! - `identidade`: a conta Olm (vodozemac) do aparelho.
 //! - `codigo`: o código de contato que sai da chave pública.
 //! - `cartao`: o texto do QR, com a chave pública inteira.
-//! - `contatos`: a agenda desta execução, só em memória.
+//! - `contatos`: a agenda de contatos (até 5.000).
+//! - `agenda_gravada`: a agenda no disco, cifrada com a chave do cofre, tamanho fixo.
 //! - `qr`: a grade do QR do cartão e a leitura do quadro da câmera.
 //! - `cofre`: a identidade gravada cifrada (PIN + Keystore).
 //! - `aparelho`: guarda a identidade desta execução e conduz o cofre; a chave não
@@ -13,6 +14,7 @@
 //! A queima entra numa próxima etapa, com teste de vetor conhecido e teste de
 //! adulteração (regra 8.4).
 
+pub mod agenda_gravada;
 pub mod aparelho;
 pub mod cartao;
 pub mod codigo;

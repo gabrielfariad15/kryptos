@@ -8,9 +8,11 @@
 //!   `gerar_identidade` → `preparar_pin_novo` → HMAC no Keystore → `criar_cofre`
 //! Abrir (aberturas seguintes):
 //!   `preparar_abertura` → HMAC no Keystore → `abrir_cofre`
-//! Contatos (só em memória):
+//! Contatos (gravados no cofre, documentacao/arquitetura/agenda-gravada.md):
 //!   `grade_propria` para desenhar o QR; `adicionar_contato_do_quadro` com cada quadro
-//!   da câmera (ou `adicionar_contato_por_qr` com o texto já lido).
+//!   da câmera (ou `adicionar_contato_por_qr` com o texto já lido). Com o cofre aberto,
+//!   o contato só entra na memória depois de a agenda nova estar gravada e lida de
+//!   volta. Antes de o cofre existir, fica só na memória e vai junto na criação.
 //! Conversas (só em memória; documentacao/arquitetura/sessao-olm.md):
 //!   `nova_chave_avulsa` para B publicar; `abrir_conversa` e `cifrar` em A; `receber`
 //!   nos dois lados.
@@ -20,8 +22,8 @@
 //! primeiro. Uma chave avulsa só sai daqui depois de gravada e lida de volta; o texto
 //! de uma primeira mensagem só sai depois de a chave gasta estar gravada como gasta.
 //!
-//! Ordem das travas: a da identidade é solta antes de pegar a da agenda. Nenhuma
-//! função segura as duas ao mesmo tempo, então não há como travar uma na outra.
+//! Uma trava só: identidade, selo, agenda e conversas pertencem à mesma identidade e
+//! mudam juntos.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -32,6 +34,7 @@ use std::time::Duration;
 use vodozemac::olm::OlmMessage;
 use zeroize::Zeroizing;
 
+use crate::agenda_gravada;
 use crate::cartao::CartaoContato;
 use crate::codigo::CodigoContato;
 use crate::cofre::{self, Custo, ErroCofre, Resultado, TAMANHO_CHAVE, TAMANHO_SAL, Varredura};
@@ -50,21 +53,33 @@ struct Selo {
 }
 
 /// Tudo que pertence a uma identidade, sob a mesma trava: a conta, o selo do cofre (se
-/// o cofre está aberto) e as conversas. Trocar de identidade troca tudo de uma vez.
+/// o cofre está aberto), a agenda e as conversas. Trocar de identidade troca tudo de
+/// uma vez.
 struct Memoria {
     identidade: Identidade,
     selo: Option<Selo>,
+    agenda: Agenda,
     /// Uma conversa por contato, a mais recente. Poucos contatos: busca linear.
     conversas: Vec<(CodigoContato, Sessao)>,
 }
 
 impl Memoria {
-    fn nova(identidade: Identidade, selo: Option<Selo>) -> Self {
+    fn nova(identidade: Identidade, selo: Option<Selo>, agenda: Agenda) -> Self {
         Self {
             identidade,
             selo,
+            agenda,
             conversas: Vec::new(),
         }
+    }
+
+    fn contato(&self, codigo: CodigoContato) -> Result<Contato, ErroConversa> {
+        self.agenda
+            .contatos()
+            .iter()
+            .find(|c| c.codigo() == codigo)
+            .copied()
+            .ok_or(ErroConversa::ContatoDesconhecido)
     }
 
     fn conversa(&mut self, codigo: CodigoContato) -> Option<&mut Sessao> {
@@ -103,19 +118,29 @@ impl Memoria {
     }
 }
 
+/// Grava a agenda e prova lendo de volta: o arquivo abre com a mesma chave e traz a
+/// mesma agenda, na mesma ordem.
+fn gravar_agenda(
+    pasta: &Path,
+    chave: &[u8; TAMANHO_CHAVE],
+    agenda: &Agenda,
+    proprio: &vodozemac::olm::IdentityKeys,
+) -> Resultado<()> {
+    cofre::gravar_agenda(pasta, &agenda_gravada::selar(agenda, chave)?)?;
+    let lida = cofre::ler_agenda(pasta)?.ok_or(ErroCofre::AgendaCorrompida)?;
+    if agenda_gravada::abrir(&lida, chave, proprio)? != *agenda {
+        return Err(ErroCofre::AgendaCorrompida);
+    }
+    Ok(())
+}
+
 static IDENTIDADE: Mutex<Option<Memoria>> = Mutex::new(None);
-static AGENDA: Mutex<Agenda> = Mutex::new(Agenda::nova());
 
 fn trava() -> MutexGuard<'static, Option<Memoria>> {
     // Trava envenenada quer dizer que outra thread entrou em pânico segurando-a. O valor
     // guardado continua inteiro, porque toda escrita troca o valor de uma vez. Por isso
     // seguimos com ele em vez de derrubar o app.
     IDENTIDADE.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-fn trava_agenda() -> MutexGuard<'static, Agenda> {
-    // Mesmo raciocínio: a agenda só muda por um `push` ou um `clear` inteiros.
-    AGENDA.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Motivo de uma operação de conversa não acontecer. Não carrega chave nem texto.
@@ -172,7 +197,7 @@ impl From<ErroCofre> for ErroConversa {
 pub fn gerar_identidade() -> CodigoContato {
     let mut guarda = trava();
     guarda
-        .get_or_insert_with(|| Memoria::nova(Identidade::nova(), None))
+        .get_or_insert_with(|| Memoria::nova(Identidade::nova(), None, Agenda::nova()))
         .identidade
         .codigo_contato()
 }
@@ -184,10 +209,10 @@ pub fn codigo_atual() -> Option<CodigoContato> {
 
 /// Tira a identidade, a chave do cofre, as conversas e a agenda da memória (a conta do
 /// vodozemac e a chave do cofre zeram ao sair). É o que acontece quando o app fecha; o
-/// teste no aparelho usa para simular a reabertura.
+/// teste no aparelho usa para simular a reabertura. A agenda gravada fica no disco e
+/// volta com `abrir_cofre`.
 pub fn esquecer() {
     *trava() = None;
-    trava_agenda().limpar();
 }
 
 /// Cartão deste aparelho, para desenhar o QR. `None` sem identidade na memória.
@@ -197,13 +222,20 @@ pub fn cartao_proprio() -> Option<CartaoContato> {
         .map(|m| CartaoContato::de_chaves(&m.identidade.chaves_publicas()))
 }
 
-/// Põe na agenda o contato do texto lido no QR, conferido por QR.
+/// Põe na agenda o contato do texto lido no QR, conferido por QR. Com o cofre aberto,
+/// o disco primeiro: a agenda nova é gravada e lida de volta, e só então troca a da
+/// memória. Se a gravação falhar, o contato não entra.
 pub fn adicionar_contato_por_qr(texto: &str) -> Result<Adicao, ErroAgenda> {
-    let proprio = trava()
-        .as_ref()
-        .map(|m| m.identidade.chaves_publicas())
-        .ok_or(ErroAgenda::SemIdentidade)?;
-    trava_agenda().adicionar_por_qr(texto, &proprio)
+    let mut guarda = trava();
+    let memoria = guarda.as_mut().ok_or(ErroAgenda::SemIdentidade)?;
+    let proprio = memoria.identidade.chaves_publicas();
+    let mut nova = memoria.agenda.clone();
+    let adicao = nova.adicionar_por_qr(texto, &proprio)?;
+    if let (Adicao::Novo(_), Some(selo)) = (adicao, memoria.selo.as_ref()) {
+        gravar_agenda(&selo.pasta, &selo.chave, &nova, &proprio).map_err(ErroAgenda::Gravacao)?;
+    }
+    memoria.agenda = nova;
+    Ok(adicao)
 }
 
 /// Grade do QR deste aparelho, para a tela desenhar. `None` sem identidade na memória.
@@ -228,9 +260,12 @@ pub fn adicionar_contato_do_quadro(
     }
 }
 
-/// Cópia da agenda, na ordem em que os contatos entraram.
+/// Cópia da agenda, na ordem em que os contatos entraram. Vazia sem identidade.
 pub fn contatos() -> Vec<Contato> {
-    trava_agenda().contatos().to_vec()
+    trava()
+        .as_ref()
+        .map(|m| m.agenda.contatos().to_vec())
+        .unwrap_or_default()
 }
 
 /// Sal novo e PIN esticado, para o Kotlin passar no HMAC do Keystore.
@@ -250,8 +285,12 @@ fn preparar_pin_novo_com_custo(pin: &[u8], custo: Custo) -> Resultado<PinPrepara
     Ok(PinPreparado { sal, esticado })
 }
 
-/// Grava a identidade da memória no cofre novo e guarda o selo para regravar. Recusa
-/// se não há identidade ou se o cofre já existe.
+/// Grava a agenda da memória e a identidade no cofre novo e guarda o selo para
+/// regravar. Recusa se não há identidade ou se o cofre já existe.
+///
+/// A agenda vai primeiro, mesmo vazia: assim o arquivo existe desde a criação e a
+/// existência dele não diz se há contatos. Se a identidade falhar depois, a agenda que
+/// ficou é sobrescrita na próxima tentativa (sem cofre, nada a lê).
 pub fn criar_cofre(pasta: &Path, sal: &[u8], chave_do_cofre: &[u8]) -> Resultado<()> {
     criar_cofre_com_custo(pasta, sal, chave_do_cofre, cofre::CUSTO_PADRAO)
 }
@@ -269,6 +308,8 @@ fn criar_cofre_com_custo(
     }
     let mut guarda = trava();
     let memoria = guarda.as_mut().ok_or(ErroCofre::SemIdentidade)?;
+    let proprio = memoria.identidade.chaves_publicas();
+    gravar_agenda(pasta, &chave, &memoria.agenda, &proprio)?;
     let arquivo = cofre::selar(&memoria.identidade, &chave, sal, custo)?;
     cofre::gravar_novo(pasta, &arquivo)?;
     memoria.selo = Some(Selo {
@@ -310,13 +351,26 @@ fn preparar_abertura_com(
 }
 
 /// Segunda etapa: abre o cofre com a chave do Keystore. Deu certo: zera as tentativas,
-/// põe a identidade e o selo na memória e devolve o código.
+/// abre a agenda gravada, põe identidade, selo e agenda na memória e devolve o código.
+///
+/// Agenda ausente (cofre criado antes da agenda gravada): começa vazia e já é gravada.
+/// Agenda que não abre: `AgendaCorrompida`, nada vai para a memória e nada é apagado.
+/// O PIN estava certo, então as tentativas já foram zeradas.
 pub fn abrir_cofre(pasta: &Path, chave_do_cofre: &[u8]) -> Resultado<CodigoContato> {
     let chave = cofre::chave_de(chave_do_cofre)?;
     let arquivo = cofre::ler(pasta)?;
     let (cabecalho, _) = cofre::Cabecalho::ler(&arquivo)?;
     let identidade = cofre::abrir(&arquivo, &chave)?;
     cofre::gravar_tentativas(pasta, 0)?;
+    let proprio = identidade.chaves_publicas();
+    let agenda = match cofre::ler_agenda(pasta)? {
+        Some(gravada) => agenda_gravada::abrir(&gravada, &chave, &proprio)?,
+        None => {
+            let vazia = Agenda::nova();
+            gravar_agenda(pasta, &chave, &vazia, &proprio)?;
+            vazia
+        }
+    };
     let codigo = identidade.codigo_contato();
     let selo = Selo {
         pasta: pasta.to_path_buf(),
@@ -324,9 +378,7 @@ pub fn abrir_cofre(pasta: &Path, chave_do_cofre: &[u8]) -> Resultado<CodigoConta
         sal: cabecalho.sal,
         custo: cabecalho.custo,
     };
-    *trava() = Some(Memoria::nova(identidade, Some(selo)));
-    // A agenda foi conferida contra a identidade anterior: começa vazia com a aberta.
-    trava_agenda().limpar();
+    *trava() = Some(Memoria::nova(identidade, Some(selo), agenda));
     Ok(codigo)
 }
 
@@ -345,15 +397,6 @@ pub fn procurar_segredos(pasta: &Path) -> Resultado<Varredura> {
 }
 
 // ---------------------------------------------------------------- conversas
-
-fn contato_da_agenda(codigo: CodigoContato) -> Result<Contato, ErroConversa> {
-    trava_agenda()
-        .contatos()
-        .iter()
-        .find(|c| c.codigo() == codigo)
-        .copied()
-        .ok_or(ErroConversa::ContatoDesconhecido)
-}
 
 /// Gera uma chave avulsa assinada, grava a conta no cofre e só então a entrega. Sem
 /// cofre aberto, recusa: a chave se perderia ao fechar o app.
@@ -386,9 +429,9 @@ pub fn preparar_publicacao(quantas: usize, numero: u64) -> Result<Vec<u8>, ErroC
 /// A abre a conversa com um contato da agenda, com a chave avulsa dele. Substitui a
 /// conversa anterior com o mesmo contato, se houver.
 pub fn abrir_conversa(codigo: CodigoContato, avulsa: &ChaveAvulsa) -> Result<(), ErroConversa> {
-    let contato = contato_da_agenda(codigo)?;
     let mut guarda = trava();
     let memoria = guarda.as_mut().ok_or(ErroConversa::SemIdentidade)?;
+    let contato = memoria.contato(codigo)?;
     let sessao = Sessao::abrir(&memoria.identidade, &contato, avulsa)?;
     memoria.guardar_conversa(codigo, sessao);
     Ok(())
@@ -415,9 +458,9 @@ pub fn receber(
     codigo: CodigoContato,
     mensagem: &OlmMessage,
 ) -> Result<Zeroizing<Vec<u8>>, ErroConversa> {
-    let contato = contato_da_agenda(codigo)?;
     let mut guarda = trava();
     let memoria = guarda.as_mut().ok_or(ErroConversa::SemIdentidade)?;
+    let contato = memoria.contato(codigo)?;
     if let OlmMessage::PreKey(primeira) = mensagem {
         let ja_aberta = memoria
             .conversa(codigo)
@@ -545,15 +588,18 @@ mod testes {
             let e = preparar_abertura_com(&pasta, b"135790", dormir)?;
             abrir_cofre(&pasta, &keystore_falso(e.as_ref()))?;
             let v = procurar_segredos(&pasta)?;
-            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (2, 0, 0));
+            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (3, 0, 0));
 
-            // abrir o cofre de novo começa com a agenda vazia
+            // a agenda volta ao abrir o cofre de novo
             let outro = Identidade::nova().chaves_publicas();
             adicionar_contato_por_qr(&CartaoContato::de_chaves(&outro).como_texto())?;
             assert_eq!(contatos().len(), 1);
+            let antes = contatos();
+            esquecer();
+            assert!(contatos().is_empty());
             let e = preparar_abertura_com(&pasta, b"135790", dormir)?;
             abrir_cofre(&pasta, &keystore_falso(e.as_ref()))?;
-            assert!(contatos().is_empty(), "agenda sobreviveu à abertura");
+            assert_eq!(contatos(), antes, "agenda não voltou ao abrir");
             esquecer();
             Ok(())
         })();
@@ -679,7 +725,7 @@ mod testes {
     }
 
     /// "Fecha e abre o app": tira tudo da memória e abre o cofre de novo. Devolve o
-    /// código aberto. A agenda volta vazia, como no app.
+    /// código aberto. A agenda volta do disco; as conversas, não.
     fn reabrir(pasta: &Path) -> Result<CodigoContato, Box<dyn std::error::Error>> {
         esquecer();
         let e = preparar_abertura_com(pasta, PIN, |_| {})?;
@@ -770,8 +816,9 @@ mod testes {
             for _ in 0..3 {
                 nova_chave_avulsa()?;
             }
+            // cofre, tentativas e agenda
             let v = procurar_segredos(pasta)?;
-            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (2, 0, 0));
+            assert_eq!((v.arquivos, v.ocorrencias, v.ilegiveis), (3, 0, 0));
             let em_claro = trava()
                 .as_ref()
                 .ok_or("sem identidade")?
@@ -896,7 +943,7 @@ mod testes {
         let r = (|| -> Result<(), Box<dyn std::error::Error>> {
             let chave = cofre::chave_de(&[5u8; 32])?;
             let sal = cofre::sal_novo()?;
-            let mut m = Memoria::nova(Identidade::nova(), None);
+            let mut m = Memoria::nova(Identidade::nova(), None, Agenda::nova());
             cofre::gravar_novo(&pasta, &cofre::selar(&m.identidade, &chave, sal, BARATO)?)?;
             m.selo = Some(Selo {
                 pasta: pasta.clone(),
@@ -972,5 +1019,169 @@ mod testes {
         unicos.sort_unstable();
         unicos.dedup();
         assert_eq!(unicos.len(), todos.len());
+    }
+
+    // ---------- agenda gravada ----------
+
+    fn texto_de_outro() -> (CodigoContato, String) {
+        let outro = Identidade::nova();
+        (
+            outro.codigo_contato(),
+            CartaoContato::de_chaves(&outro.chaves_publicas()).como_texto(),
+        )
+    }
+
+    fn bytes_da_agenda(pasta: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        Ok(cofre::ler_agenda(pasta)?.ok_or("sem agenda no disco")?)
+    }
+
+    #[test]
+    fn agenda_gravada_volta_depois_de_fechar_e_some_com_apagar()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let _serie = em_serie();
+        let pasta = pasta_de_teste("agenda-volta")?;
+        let r = (|| -> Result<(), Box<dyn std::error::Error>> {
+            // contato lido antes de o cofre existir vai junto na criação
+            esquecer();
+            gerar_identidade();
+            let (primeiro, texto1) = texto_de_outro();
+            assert_eq!(adicionar_contato_por_qr(&texto1)?, Adicao::Novo(primeiro));
+            assert!(
+                cofre::ler_agenda(&pasta)?.is_none(),
+                "gravou antes do cofre"
+            );
+            let novo = preparar_pin_novo_com_custo(PIN, BARATO)?;
+            criar_cofre_com_custo(
+                &pasta,
+                &novo.sal,
+                &keystore_falso(novo.esticado.as_ref()),
+                BARATO,
+            )?;
+            let na_criacao = bytes_da_agenda(&pasta)?;
+            assert_eq!(na_criacao.len(), agenda_gravada::TAMANHO_ARQUIVO);
+
+            // contato novo com o cofre aberto: arquivo regravado, mesmo tamanho
+            let (segundo, texto2) = texto_de_outro();
+            assert_eq!(adicionar_contato_por_qr(&texto2)?, Adicao::Novo(segundo));
+            let depois = bytes_da_agenda(&pasta)?;
+            assert_ne!(depois, na_criacao);
+            assert_eq!(depois.len(), agenda_gravada::TAMANHO_ARQUIVO);
+
+            // o mesmo QR de novo não regrava
+            assert_eq!(
+                adicionar_contato_por_qr(&texto2)?,
+                Adicao::JaEstava(segundo)
+            );
+            assert_eq!(bytes_da_agenda(&pasta)?, depois);
+
+            // fecha e abre: os dois voltam, na mesma ordem
+            let antes = contatos();
+            reabrir(&pasta)?;
+            assert_eq!(contatos(), antes);
+            assert_eq!(
+                contatos().iter().map(|c| c.codigo()).collect::<Vec<_>>(),
+                vec![primeiro, segundo]
+            );
+
+            // apagar leva a agenda junto
+            esquecer();
+            cofre::apagar(&pasta)?;
+            assert!(cofre::ler_agenda(&pasta)?.is_none());
+            assert_eq!(fs::read_dir(&pasta)?.count(), 0);
+            Ok(())
+        })();
+        esquecer();
+        fs::remove_dir_all(&pasta)?;
+        r
+    }
+
+    #[test]
+    fn cofre_sem_agenda_abre_com_agenda_vazia_ja_gravada() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let _serie = em_serie();
+        let pasta = pasta_de_teste("agenda-ausente")?;
+        let r = (|| -> Result<(), Box<dyn std::error::Error>> {
+            b_com_cofre(&pasta)?;
+            // cofre criado antes da agenda gravada existir
+            fs::remove_file(pasta.join(cofre::NOME_AGENDA))?;
+            reabrir(&pasta)?;
+            assert!(contatos().is_empty());
+            assert_eq!(
+                bytes_da_agenda(&pasta)?.len(),
+                agenda_gravada::TAMANHO_ARQUIVO
+            );
+            Ok(())
+        })();
+        esquecer();
+        fs::remove_dir_all(&pasta)?;
+        r
+    }
+
+    #[test]
+    fn agenda_adulterada_nao_abre_e_nada_e_apagado() -> Result<(), Box<dyn std::error::Error>> {
+        let _serie = em_serie();
+        let pasta = pasta_de_teste("agenda-adulterada")?;
+        let r = (|| -> Result<(), Box<dyn std::error::Error>> {
+            b_com_cofre(&pasta)?;
+            adicionar_contato_por_qr(&texto_de_outro().1)?;
+            let mut agenda = bytes_da_agenda(&pasta)?;
+            let meio = agenda.len() / 2;
+            agenda[meio] ^= 0x80;
+            fs::write(pasta.join(cofre::NOME_AGENDA), &agenda)?;
+            let cofre_antes = cofre::ler(&pasta)?;
+
+            esquecer();
+            let e = preparar_abertura_com(&pasta, PIN, |_| {})?;
+            assert_eq!(
+                abrir_cofre(&pasta, &keystore_falso(e.as_ref())).err(),
+                Some(ErroCofre::AgendaCorrompida)
+            );
+            assert_eq!(codigo_atual(), None, "abriu pela metade");
+            assert!(contatos().is_empty());
+            assert_eq!(bytes_da_agenda(&pasta)?, agenda, "mexeu na agenda");
+            assert_eq!(cofre::ler(&pasta)?, cofre_antes, "mexeu no cofre");
+            // o PIN estava certo: não fica contando como erro
+            assert_eq!(cofre::ler_tentativas(&pasta)?, 0);
+            Ok(())
+        })();
+        esquecer();
+        fs::remove_dir_all(&pasta)?;
+        r
+    }
+
+    #[test]
+    fn gravacao_da_agenda_falha_e_o_contato_nao_entra() -> Result<(), Box<dyn std::error::Error>> {
+        let _serie = em_serie();
+        let pasta = pasta_de_teste("agenda-falha")?;
+        let r = (|| -> Result<(), Box<dyn std::error::Error>> {
+            b_com_cofre(&pasta)?;
+            let gravada = bytes_da_agenda(&pasta)?;
+            // uma pasta no lugar do arquivo: a troca de nome falha
+            fs::remove_file(pasta.join(cofre::NOME_AGENDA))?;
+            fs::create_dir(pasta.join(cofre::NOME_AGENDA))?;
+            let (codigo, texto) = texto_de_outro();
+            assert!(matches!(
+                adicionar_contato_por_qr(&texto),
+                Err(ErroAgenda::Gravacao(ErroCofre::Disco(_)))
+            ));
+            assert!(contatos().is_empty(), "entrou sem gravar");
+            assert!(
+                !pasta.join(format!("{}.novo", cofre::NOME_AGENDA)).exists(),
+                "temporário ficou no disco"
+            );
+            // disco de volta: o mesmo QR entra e grava
+            fs::remove_dir(pasta.join(cofre::NOME_AGENDA))?;
+            fs::write(pasta.join(cofre::NOME_AGENDA), &gravada)?;
+            assert_eq!(adicionar_contato_por_qr(&texto)?, Adicao::Novo(codigo));
+            reabrir(&pasta)?;
+            assert_eq!(
+                contatos().iter().map(|c| c.codigo()).collect::<Vec<_>>(),
+                vec![codigo]
+            );
+            Ok(())
+        })();
+        esquecer();
+        fs::remove_dir_all(&pasta)?;
+        r
     }
 }

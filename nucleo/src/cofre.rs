@@ -20,6 +20,10 @@
 //! da conta recusa; é isso que o app mostra como "PIN incorreto".
 //!
 //! Formato e o que esta solução não resolve: `documentacao/arquitetura/cofre-da-identidade.md`.
+//!
+//! A agenda de contatos fica na mesma pasta, em arquivo próprio (`NOME_AGENDA`), cifrada
+//! com uma chave tirada da mesma chave do cofre (`agenda_gravada`). Aqui ficam só a
+//! gravação e a leitura do arquivo.
 
 use std::fmt;
 use std::fs;
@@ -47,6 +51,7 @@ const TAMANHO_NONCE: usize = 16;
 /// informa (no Android, `noBackupFilesDir`: fica fora de qualquer backup).
 pub const NOME_COFRE: &str = "identidade.kryptos";
 pub const NOME_TENTATIVAS: &str = "tentativas";
+pub const NOME_AGENDA: &str = "agenda.kryptos";
 
 const MAGICO: &[u8; 8] = b"KRYCOFRE";
 const VERSAO: u8 = 1;
@@ -97,6 +102,10 @@ pub enum ErroCofre {
     Aleatorio,
     Disco(io::ErrorKind),
     Argon2,
+    /// A agenda gravada não abre com a chave do cofre que abriu a identidade, ou abre
+    /// fora do formato: arquivo alterado ou danificado.
+    AgendaCorrompida,
+    AgendaVersaoDesconhecida,
 }
 
 impl ErroCofre {
@@ -115,6 +124,8 @@ impl ErroCofre {
             Self::Aleatorio => "SEM_ALEATORIO",
             Self::Disco(_) => "DISCO",
             Self::Argon2 => "ARGON2",
+            Self::AgendaCorrompida => "AGENDA_CORROMPIDA",
+            Self::AgendaVersaoDesconhecida => "AGENDA_VERSAO_DESCONHECIDA",
         }
     }
 }
@@ -183,7 +194,7 @@ pub fn esticar_pin(
     Ok(saida)
 }
 
-fn aleatorio<const N: usize>() -> Resultado<[u8; N]> {
+pub(crate) fn aleatorio<const N: usize>() -> Resultado<[u8; N]> {
     let mut b = [0u8; N];
     getrandom::fill(&mut b).map_err(|_| ErroCofre::Aleatorio)?;
     Ok(b)
@@ -410,6 +421,21 @@ pub fn ler(pasta: &Path) -> Resultado<Vec<u8>> {
     }
 }
 
+/// Grava a agenda (já cifrada) com a mesma troca atômica do cofre.
+pub fn gravar_agenda(pasta: &Path, conteudo: &[u8]) -> Resultado<()> {
+    gravar_atomico(pasta, NOME_AGENDA, conteudo)
+}
+
+/// Conteúdo da agenda gravada. `None`: não há arquivo (cofre criado antes da agenda
+/// gravada existir).
+pub fn ler_agenda(pasta: &Path) -> Resultado<Option<Vec<u8>>> {
+    match fs::read(pasta.join(NOME_AGENDA)) {
+        Ok(b) => Ok(Some(b)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Falhas seguidas registradas. Arquivo ausente: zero. Ilegível: conta como
 /// `FALHAS_SE_CONTADOR_ILEGIVEL`, para apagar o contador não zerar a espera.
 pub fn ler_tentativas(pasta: &Path) -> Resultado<u32> {
@@ -435,10 +461,11 @@ pub fn gravar_tentativas(pasta: &Path, falhas: u32) -> Resultado<()> {
     gravar_atomico(pasta, NOME_TENTATIVAS, falhas.to_string().as_bytes())
 }
 
-/// Apaga cofre e contador. Usado pelo teste no aparelho e, adiante, pelo "apagar tudo".
-/// Sem a chave do Keystore, que o Kotlin apaga.
+/// Apaga cofre, contador e agenda. Usado pelo teste no aparelho e, adiante, pelo
+/// "apagar tudo". Sem a chave do Keystore, que o Kotlin apaga: é ela que deixa ilegível
+/// o que sobrar no armazenamento depois de apagado.
 pub fn apagar(pasta: &Path) -> Resultado<()> {
-    for nome in [NOME_COFRE, NOME_TENTATIVAS] {
+    for nome in [NOME_AGENDA, NOME_COFRE, NOME_TENTATIVAS] {
         match fs::remove_file(pasta.join(nome)) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}

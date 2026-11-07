@@ -1,6 +1,6 @@
-// Agenda de verdade: o núcleo em Rust, pela ponte. A agenda fica só na memória do
-// núcleo; aqui chegam o código de contato e a forma de conferência, nunca a chave
-// nem o texto do QR.
+// Agenda de verdade: o núcleo em Rust, pela ponte. A agenda fica no núcleo, gravada
+// cifrada junto do cofre (documentacao/arquitetura/agenda-gravada.md); aqui chegam o
+// código de contato e a forma de conferência, nunca a chave nem o texto do QR.
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge.dart';
 
