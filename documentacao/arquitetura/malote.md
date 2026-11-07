@@ -62,6 +62,29 @@ Busca de quem nunca recebeu carta devolve uma entrega vazia e não grava nada. S
 
 Os limites ficam em `Limites::PADRAO`. Os testes usam limites menores.
 
+## No app
+
+- **`lib/relay.dart` (`ClienteDoRelay`):** o HTTP, com o `HttpClient` do `dart:io`, sem pacote de fora.
+  - Os sockets do Dart não passam pela política de rede do Android, então a regra de TLS fica no código: só `https`, com exceção de `127.0.0.1` e `localhost`, que são o relay de teste pelo `adb reverse`.
+  - Respostas acima de 2 MiB são cortadas.
+  - Erro do relay vira o código fixo (`NUMERO_VELHO 42` traz o 42).
+- **`lib/correio.dart` (`Correio`):**
+  - publica as chaves avulsas: mantém 50 e repõe abaixo de 20 (estimo);
+  - abre conversa com a chave avulsa retirada do contato;
+  - envia;
+  - busca: cada carta passa pela porta única da caixa. Confirma as seladas, as repetidas e as que não abrem. Para quando a caixa enche, e o resto fica no relay.
+  - Os números da publicação e da busca são os milissegundos do relógio. Com `NUMERO_VELHO`, o app tenta uma vez com o seguinte, sem guardar nada.
+  - A publicação com chaves só sai depois de uma consulta acertar o número. Assim, não sobra chave avulsa gerada que nunca foi publicada.
+- **Ponte:** `relay_publicacao`, `relay_busca`, `relay_ler_entrega`, `dono_do_contato` e `tem_conversa`. O núcleo monta e assina; o Dart só leva e traz.
+- **Teste no aparelho (`integration_test/relay_test.dart`):** a suíte (`-Aparelho`) sobe o relay de teste no computador e liga a porta 18080 ao celular com `adb reverse`.
+  1. B publica as chaves.
+  2. A retira uma chave de B e manda uma carta.
+  3. B busca, sela, lê e queima.
+  4. A busca seguinte vem vazia.
+  5. O estoque de B baixou uma chave.
+
+  Sai uma linha MEDIDA com os tempos.
+
 ## Como é provado
 
 - **Formato (`protocolo/src/malote.rs`):**
@@ -100,4 +123,4 @@ Os limites ficam em `Limites::PADRAO`. Os testes usam limites menores.
 - **Enchimento por estranho:** qualquer um pode encher o malote de um destinatário até o limite (500 cartas ou 8 MiB). O limite por IP fica no proxy da implantação. As cartas de lixo não abrem no aparelho e entram na conta de "não puderam ser abertas".
 - **Relógio do servidor:** se o relógio do relay andar para trás, as cartas duram mais. Se andar para frente, vencem antes.
 - **Disco do relay:** o arquivo do redb guarda as cartas cifradas até a confirmação ou os 7 dias. Apagar de um disco não é garantido, mas a carta é cifrada de ponta a ponta e a conversa tem sigilo para a frente.
-- **Ainda não feito:** o app chamando estas rotas (próxima etapa).
+- **Conversa encerrada do outro lado:** se o app de B fechou depois que A abriu a conversa, as cartas seguintes de A não abrem em B (`NaoAbre`). A só descobre se B disser por outro meio. Abrir conversa nova a cada vez que o app de A abre não resolve, porque o fechamento é do lado de B.

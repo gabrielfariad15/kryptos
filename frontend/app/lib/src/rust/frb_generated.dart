@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -237415713;
+  int get rustContentHash => -855466022;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -159,6 +159,8 @@ abstract class RustLibApi extends BaseApi {
 
   List<ContatoDaAgenda> crateApiNucleoContatos();
 
+  String crateApiNucleoDonoDoContato({required String codigo});
+
   void crateApiNucleoEsquecerIdentidade();
 
   String crateApiNucleoGerarCodigoContato();
@@ -175,6 +177,22 @@ abstract class RustLibApi extends BaseApi {
     required String pasta,
     required List<int> texto,
   });
+
+  Future<Uint8List> crateApiNucleoRelayBusca({
+    required PlatformInt64 numero,
+    required List<Uint8List> confirmadas,
+  });
+
+  Future<List<CartaEntregue>> crateApiNucleoRelayLerEntrega({
+    required List<int> entrega,
+  });
+
+  Future<Uint8List> crateApiNucleoRelayPublicacao({
+    required int quantas,
+    required PlatformInt64 numero,
+  });
+
+  bool crateApiNucleoTemConversa({required String codigo});
 
   String crateApiNucleoVersaoNucleo();
 }
@@ -900,12 +918,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "contatos", argNames: []);
 
   @override
+  String crateApiNucleoDonoDoContato({required String codigo}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(codigo, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 25)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoDonoDoContatoConstMeta,
+        argValues: [codigo],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoDonoDoContatoConstMeta =>
+      const TaskConstMeta(debugName: "dono_do_contato", argNames: ["codigo"]);
+
+  @override
   void crateApiNucleoEsquecerIdentidade() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 25)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 26)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_unit,
@@ -927,7 +968,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 26)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 27)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -949,7 +990,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 27)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 28)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_opt_box_autoadd_grade_do_qr,
@@ -974,7 +1015,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 29,
             port: port_,
           );
         },
@@ -1001,7 +1042,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1029,7 +1070,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1061,7 +1102,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 32,
             port: port_,
           );
         },
@@ -1083,12 +1124,137 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<Uint8List> crateApiNucleoRelayBusca({
+    required PlatformInt64 numero,
+    required List<Uint8List> confirmadas,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(numero, serializer);
+          sse_encode_list_list_prim_u_8_strict(confirmadas, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 33,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoRelayBuscaConstMeta,
+        argValues: [numero, confirmadas],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoRelayBuscaConstMeta => const TaskConstMeta(
+    debugName: "relay_busca",
+    argNames: ["numero", "confirmadas"],
+  );
+
+  @override
+  Future<List<CartaEntregue>> crateApiNucleoRelayLerEntrega({
+    required List<int> entrega,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(entrega, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 34,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_carta_entregue,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoRelayLerEntregaConstMeta,
+        argValues: [entrega],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoRelayLerEntregaConstMeta =>
+      const TaskConstMeta(
+        debugName: "relay_ler_entrega",
+        argNames: ["entrega"],
+      );
+
+  @override
+  Future<Uint8List> crateApiNucleoRelayPublicacao({
+    required int quantas,
+    required PlatformInt64 numero,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_32(quantas, serializer);
+          sse_encode_i_64(numero, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 35,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoRelayPublicacaoConstMeta,
+        argValues: [quantas, numero],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoRelayPublicacaoConstMeta =>
+      const TaskConstMeta(
+        debugName: "relay_publicacao",
+        argNames: ["quantas", "numero"],
+      );
+
+  @override
+  bool crateApiNucleoTemConversa({required String codigo}) {
+    return handler.executeSync(
+      SyncTask(
+        callFfi: () {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(codigo, serializer);
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 36)!;
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNucleoTemConversaConstMeta,
+        argValues: [codigo],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiNucleoTemConversaConstMeta =>
+      const TaskConstMeta(debugName: "tem_conversa", argNames: ["codigo"]);
+
+  @override
   String crateApiNucleoVersaoNucleo() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 32)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 37)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -1132,6 +1298,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   GradeDoQr dco_decode_box_autoadd_grade_do_qr(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_grade_do_qr(raw);
+  }
+
+  @protected
+  CartaEntregue dco_decode_carta_entregue(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return CartaEntregue(
+      id: dco_decode_list_prim_u_8_strict(arr[0]),
+      carta: dco_decode_list_prim_u_8_strict(arr[1]),
+    );
   }
 
   @protected
@@ -1185,9 +1363,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeI64(raw);
+  }
+
+  @protected
+  List<CartaEntregue> dco_decode_list_carta_entregue(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_carta_entregue).toList();
+  }
+
+  @protected
   List<ContatoDaAgenda> dco_decode_list_contato_da_agenda(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_contato_da_agenda).toList();
+  }
+
+  @protected
+  List<Uint8List> dco_decode_list_list_prim_u_8_strict(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_list_prim_u_8_strict).toList();
   }
 
   @protected
@@ -1328,6 +1524,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CartaEntregue sse_decode_carta_entregue(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_carta = sse_decode_list_prim_u_8_strict(deserializer);
+    return CartaEntregue(id: var_id, carta: var_carta);
+  }
+
+  @protected
   ChegadaDaCarta sse_decode_chegada_da_carta(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_tipo = sse_decode_String(deserializer);
@@ -1369,6 +1573,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getPlatformInt64();
+  }
+
+  @protected
+  List<CartaEntregue> sse_decode_list_carta_entregue(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <CartaEntregue>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_carta_entregue(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<ContatoDaAgenda> sse_decode_list_contato_da_agenda(
     SseDeserializer deserializer,
   ) {
@@ -1378,6 +1602,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <ContatoDaAgenda>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_contato_da_agenda(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<Uint8List> sse_decode_list_list_prim_u_8_strict(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Uint8List>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_list_prim_u_8_strict(deserializer));
     }
     return ans_;
   }
@@ -1547,6 +1785,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_carta_entregue(CartaEntregue self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_prim_u_8_strict(self.id, serializer);
+    sse_encode_list_prim_u_8_strict(self.carta, serializer);
+  }
+
+  @protected
   void sse_encode_chegada_da_carta(
     ChegadaDaCarta self,
     SseSerializer serializer,
@@ -1583,6 +1828,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putPlatformInt64(self);
+  }
+
+  @protected
+  void sse_encode_list_carta_entregue(
+    List<CartaEntregue> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_carta_entregue(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_contato_da_agenda(
     List<ContatoDaAgenda> self,
     SseSerializer serializer,
@@ -1591,6 +1854,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_contato_da_agenda(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_list_prim_u_8_strict(
+    List<Uint8List> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_list_prim_u_8_strict(item, serializer);
     }
   }
 

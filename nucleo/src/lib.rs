@@ -26,6 +26,9 @@ pub mod identidade;
 pub mod qr;
 pub mod sessao;
 
+/// O formato do relay e da carta, para a ponte não depender de outro crate.
+pub use kryptos_protocolo as protocolo;
+
 pub use cartao::{CartaoContato, ErroCartao};
 pub use codigo::{CodigoContato, ErroCodigo};
 pub use contatos::{Adicao, Conferencia, Contato, ErroAgenda};

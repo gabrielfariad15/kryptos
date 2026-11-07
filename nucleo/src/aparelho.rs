@@ -505,6 +505,20 @@ pub fn preparar_publicacao(quantas: usize, numero: u64) -> Result<Vec<u8>, ErroC
     Ok(publicacao)
 }
 
+/// Há conversa aberta com o contato nesta execução do app?
+pub fn tem_conversa(codigo: CodigoContato) -> bool {
+    trava()
+        .as_ref()
+        .is_some_and(|m| m.conversas.iter().any(|(c, _)| *c == codigo))
+}
+
+/// Ed25519 do contato da agenda, para pedir a chave avulsa dele no relay. Pública.
+pub fn dono_do_contato(codigo: CodigoContato) -> Result<[u8; 32], ErroConversa> {
+    let guarda = trava();
+    let memoria = guarda.as_ref().ok_or(ErroConversa::SemIdentidade)?;
+    Ok(*memoria.contato(codigo)?.chaves().ed25519.as_bytes())
+}
+
 /// Busca assinada para o malote do relay: confirma `confirmadas` e pede as próximas
 /// cartas. Não precisa do cofre: só assina.
 pub fn preparar_busca(

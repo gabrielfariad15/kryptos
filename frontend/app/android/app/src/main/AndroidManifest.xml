@@ -7,6 +7,10 @@
          de 07/11/2026 achou no app instalado). O FOREGROUND_SERVICE_CAMERA não entra:
          não há leitura em segundo plano. -->
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Internet para o relay (correio.dart). O debug e o profile ja tinham; o app de
+         distribuicao precisa dela aqui. So https, fora o relay de teste em 127.0.0.1
+         (regra em relay.dart). -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />

@@ -39,6 +39,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   GradeDoQr dco_decode_box_autoadd_grade_do_qr(dynamic raw);
 
   @protected
+  CartaEntregue dco_decode_carta_entregue(dynamic raw);
+
+  @protected
   ChegadaDaCarta dco_decode_chegada_da_carta(dynamic raw);
 
   @protected
@@ -51,7 +54,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   GradeDoQr dco_decode_grade_do_qr(dynamic raw);
 
   @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw);
+
+  @protected
+  List<CartaEntregue> dco_decode_list_carta_entregue(dynamic raw);
+
+  @protected
   List<ContatoDaAgenda> dco_decode_list_contato_da_agenda(dynamic raw);
+
+  @protected
+  List<Uint8List> dco_decode_list_list_prim_u_8_strict(dynamic raw);
 
   @protected
   List<MensagemNaCaixa> dco_decode_list_mensagem_na_caixa(dynamic raw);
@@ -108,6 +120,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   GradeDoQr sse_decode_box_autoadd_grade_do_qr(SseDeserializer deserializer);
 
   @protected
+  CartaEntregue sse_decode_carta_entregue(SseDeserializer deserializer);
+
+  @protected
   ChegadaDaCarta sse_decode_chegada_da_carta(SseDeserializer deserializer);
 
   @protected
@@ -120,7 +135,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   GradeDoQr sse_decode_grade_do_qr(SseDeserializer deserializer);
 
   @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
+
+  @protected
+  List<CartaEntregue> sse_decode_list_carta_entregue(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<ContatoDaAgenda> sse_decode_list_contato_da_agenda(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<Uint8List> sse_decode_list_list_prim_u_8_strict(
     SseDeserializer deserializer,
   );
 
@@ -197,6 +225,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_carta_entregue(CartaEntregue self, SseSerializer serializer);
+
+  @protected
   void sse_encode_chegada_da_carta(
     ChegadaDaCarta self,
     SseSerializer serializer,
@@ -215,8 +246,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_grade_do_qr(GradeDoQr self, SseSerializer serializer);
 
   @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_carta_entregue(
+    List<CartaEntregue> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_contato_da_agenda(
     List<ContatoDaAgenda> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_list_prim_u_8_strict(
+    List<Uint8List> self,
     SseSerializer serializer,
   );
 

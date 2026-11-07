@@ -353,6 +353,67 @@ pub fn caixa_chave_trocada(gaveta: u8) -> anyhow::Result<()> {
     aparelho::chave_trocada(gaveta).map_err(erro_caixa)
 }
 
+// ---------- Relay (documentacao/arquitetura/malote.md e estoque-de-chaves.md) ----------
+//
+// O núcleo monta e assina o que vai para o relay; o Dart só faz o HTTP. Os números
+// chegam como i64 (o int do Dart) e não podem ser negativos.
+
+fn numero_de(n: i64) -> anyhow::Result<u64> {
+    u64::try_from(n).map_err(|_| anyhow::anyhow!("NUMERO_INVALIDO"))
+}
+
+/// Há conversa aberta com o contato nesta execução do app?
+#[flutter_rust_bridge::frb(sync)]
+pub fn tem_conversa(codigo: String) -> anyhow::Result<bool> {
+    Ok(aparelho::tem_conversa(codigo_de(&codigo)?))
+}
+
+/// O contato no caminho de `/v1/retirar/{dono}`: a Ed25519 dele em hexadecimal. Pública.
+#[flutter_rust_bridge::frb(sync)]
+pub fn dono_do_contato(codigo: String) -> anyhow::Result<String> {
+    let dono = aparelho::dono_do_contato(codigo_de(&codigo)?)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    Ok(kryptos_nucleo::protocolo::dono_em_texto(&dono))
+}
+
+/// Publicação assinada com `quantas` chaves avulsas novas (já gravadas no cofre).
+/// Com 0, só consulta o estoque.
+pub fn relay_publicacao(quantas: u32, numero: i64) -> anyhow::Result<Vec<u8>> {
+    let quantas = usize::try_from(quantas).map_err(|_| anyhow::anyhow!("DEMAIS_CHAVES"))?;
+    aparelho::preparar_publicacao(quantas, numero_de(numero)?)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+}
+
+/// Busca assinada para o malote: confirma `confirmadas` (ids de 16 bytes) e pede as
+/// próximas cartas.
+pub fn relay_busca(numero: i64, confirmadas: Vec<Vec<u8>>) -> anyhow::Result<Vec<u8>> {
+    let ids = confirmadas
+        .iter()
+        .map(|id| <[u8; 16]>::try_from(id.as_slice()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| anyhow::anyhow!("ID_INVALIDO"))?;
+    aparelho::preparar_busca(numero_de(numero)?, ids).map_err(|e| anyhow::anyhow!(e.to_string()))
+}
+
+/// Uma carta entregue pelo malote, com o id que a confirma.
+pub struct CartaEntregue {
+    pub id: Vec<u8>,
+    pub carta: Vec<u8>,
+}
+
+/// Lê a resposta da busca (leitura estrita).
+pub fn relay_ler_entrega(entrega: Vec<u8>) -> anyhow::Result<Vec<CartaEntregue>> {
+    let e = kryptos_nucleo::protocolo::malote::Entrega::ler(&entrega)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    Ok(e.cartas
+        .into_iter()
+        .map(|(id, carta)| CartaEntregue {
+            id: id.to_vec(),
+            carta,
+        })
+        .collect())
+}
+
 /// Contagens da busca de um texto (em 8 formas) em todos os arquivos da pasta. Para o
 /// teste no aparelho provar que o texto não ficou no disco. Nunca o conteúdo.
 pub fn procurar_texto(pasta: String, texto: Vec<u8>) -> anyhow::Result<Varredura> {
@@ -552,6 +613,64 @@ mod testes {
             // calibração: em claro, a busca acha
             std::fs::write(pasta_b.join("vazamento"), &texto)?;
             assert!(procurar_texto(pasta.clone(), texto)?.ocorrencias >= 1);
+            Ok(())
+        })();
+        esquecer_identidade();
+        std::fs::remove_dir_all(&pasta_b)?;
+        r
+    }
+
+    /// O que vai para o relay sai assinado e no formato; a entrega volta lida.
+    #[test]
+    fn relay_pela_ponte() -> anyhow::Result<()> {
+        use kryptos_nucleo::protocolo::malote::{Busca, Entrega};
+        use kryptos_nucleo::protocolo::{dono_em_texto, Publicacao};
+        let _serie = em_serie();
+        let pasta_b =
+            std::env::temp_dir().join(format!("kryptos-ponte-relay-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&pasta_b);
+        std::fs::create_dir_all(&pasta_b)?;
+        let pasta = pasta_b.to_string_lossy().to_string();
+        let r = (|| -> anyhow::Result<()> {
+            esquecer_identidade();
+            gerar_codigo_contato();
+            // sem cofre não publica (a chave avulsa se perderia)
+            assert!(relay_publicacao(1, 1).is_err());
+            let p = cofre_preparar_pin_novo(b"246801".to_vec())?;
+            cofre_criar(pasta.clone(), p.sal, keystore_falso("cofre", &p.esticado))?;
+            let publicacao = Publicacao::conferir(&relay_publicacao(3, 42)?)?;
+            assert_eq!((publicacao.numero, publicacao.chaves.len()), (42, 3));
+            assert!(relay_publicacao(1, -1).is_err(), "número negativo");
+
+            let busca = Busca::conferir(&relay_busca(7, vec![vec![1; 16], vec![2; 16]])?)?;
+            assert_eq!(busca.numero, 7);
+            assert_eq!(busca.confirmadas, vec![[1; 16], [2; 16]]);
+            assert_eq!(busca.destinatario, publicacao.dono);
+            assert!(relay_busca(8, vec![vec![1; 15]]).is_err(), "id de 15 bytes");
+
+            let entrega = Entrega {
+                cartas: vec![([5; 16], vec![9; 40])],
+            }
+            .codificar()?;
+            let lidas = relay_ler_entrega(entrega)?;
+            assert_eq!(lidas.len(), 1);
+            assert_eq!(
+                (lidas[0].id.clone(), lidas[0].carta.clone()),
+                (vec![5; 16], vec![9; 40])
+            );
+            assert!(relay_ler_entrega(vec![1, 0]).is_err(), "entrega cortada");
+
+            // o dono de um contato é a Ed25519 dele, em hexadecimal
+            let cartao_b = cartao_proprio_texto().ok_or_else(|| anyhow::anyhow!("sem cartão"))?;
+            esquecer_identidade();
+            gerar_codigo_contato();
+            let b = adicionar_contato_por_texto(cartao_b)?;
+            assert_eq!(
+                dono_do_contato(b.codigo.clone())?,
+                dono_em_texto(&publicacao.dono)
+            );
+            assert!(!tem_conversa(b.codigo.clone())?);
+            assert!(dono_do_contato("0000-0000".to_string()).is_err());
             Ok(())
         })();
         esquecer_identidade();

@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `codigo_de`, `erro_caixa`, `erro`
+// These functions are ignored because they are not marked as `pub`: `codigo_de`, `erro_caixa`, `erro`, `numero_de`
 
 /// Versão do núcleo compilado dentro do app.
 String versaoNucleo() => RustLib.instance.api.crateApiNucleoVersaoNucleo();
@@ -157,6 +157,38 @@ Future<Uint8List> caixaQueimarLidas() =>
 Future<void> caixaChaveTrocada({required int gaveta}) =>
     RustLib.instance.api.crateApiNucleoCaixaChaveTrocada(gaveta: gaveta);
 
+/// Há conversa aberta com o contato nesta execução do app?
+bool temConversa({required String codigo}) =>
+    RustLib.instance.api.crateApiNucleoTemConversa(codigo: codigo);
+
+/// O contato no caminho de `/v1/retirar/{dono}`: a Ed25519 dele em hexadecimal. Pública.
+String donoDoContato({required String codigo}) =>
+    RustLib.instance.api.crateApiNucleoDonoDoContato(codigo: codigo);
+
+/// Publicação assinada com `quantas` chaves avulsas novas (já gravadas no cofre).
+/// Com 0, só consulta o estoque.
+Future<Uint8List> relayPublicacao({
+  required int quantas,
+  required PlatformInt64 numero,
+}) => RustLib.instance.api.crateApiNucleoRelayPublicacao(
+  quantas: quantas,
+  numero: numero,
+);
+
+/// Busca assinada para o malote: confirma `confirmadas` (ids de 16 bytes) e pede as
+/// próximas cartas.
+Future<Uint8List> relayBusca({
+  required PlatformInt64 numero,
+  required List<Uint8List> confirmadas,
+}) => RustLib.instance.api.crateApiNucleoRelayBusca(
+  numero: numero,
+  confirmadas: confirmadas,
+);
+
+/// Lê a resposta da busca (leitura estrita).
+Future<List<CartaEntregue>> relayLerEntrega({required List<int> entrega}) =>
+    RustLib.instance.api.crateApiNucleoRelayLerEntrega(entrega: entrega);
+
 /// Contagens da busca de um texto (em 8 formas) em todos os arquivos da pasta. Para o
 /// teste no aparelho provar que o texto não ficou no disco. Nunca o conteúdo.
 Future<Varredura> procurarTexto({
@@ -166,6 +198,25 @@ Future<Varredura> procurarTexto({
   pasta: pasta,
   texto: texto,
 );
+
+/// Uma carta entregue pelo malote, com o id que a confirma.
+class CartaEntregue {
+  final Uint8List id;
+  final Uint8List carta;
+
+  const CartaEntregue({required this.id, required this.carta});
+
+  @override
+  int get hashCode => id.hashCode ^ carta.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CartaEntregue &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          carta == other.carta;
+}
 
 /// O que fazer com uma carta que chegou. `tipo`: SELAR (pedir o HMAC de `pedido` com a
 /// chave da `gaveta` e chamar `caixa_selar_chegada`), JA_GUARDADA, NAO_ABRE,

@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -237415713;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -855466022;
 
 // Section: executor
 
@@ -873,6 +873,38 @@ fn wire__crate__api__nucleo__contatos_impl(
         },
     )
 }
+fn wire__crate__api__nucleo__dono_do_contato_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "dono_do_contato",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_codigo = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                (move || {
+                    let output_ok = crate::api::nucleo::dono_do_contato(api_codigo)?;
+                    std::result::Result::Ok(output_ok)
+                })(),
+            )
+        },
+    )
+}
 fn wire__crate__api__nucleo__esquecer_identidade_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1103,6 +1135,147 @@ fn wire__crate__api__nucleo__procurar_texto_impl(
         },
     )
 }
+fn wire__crate__api__nucleo__relay_busca_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "relay_busca",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_numero = <i64>::sse_decode(&mut deserializer);
+            let api_confirmadas = <Vec<Vec<u8>>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok =
+                            crate::api::nucleo::relay_busca(api_numero, api_confirmadas)?;
+                        std::result::Result::Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__nucleo__relay_ler_entrega_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "relay_ler_entrega",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_entrega = <Vec<u8>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::nucleo::relay_ler_entrega(api_entrega)?;
+                        std::result::Result::Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__nucleo__relay_publicacao_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "relay_publicacao",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_quantas = <u32>::sse_decode(&mut deserializer);
+            let api_numero = <i64>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok =
+                            crate::api::nucleo::relay_publicacao(api_quantas, api_numero)?;
+                        std::result::Result::Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__nucleo__tem_conversa_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "tem_conversa",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_codigo = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                (move || {
+                    let output_ok = crate::api::nucleo::tem_conversa(api_codigo)?;
+                    std::result::Result::Ok(output_ok)
+                })(),
+            )
+        },
+    )
+}
 fn wire__crate__api__nucleo__versao_nucleo_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -1158,6 +1331,18 @@ impl SseDecode for bool {
     }
 }
 
+impl SseDecode for crate::api::nucleo::CartaEntregue {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_carta = <Vec<u8>>::sse_decode(deserializer);
+        return crate::api::nucleo::CartaEntregue {
+            id: var_id,
+            carta: var_carta,
+        };
+    }
+}
+
 impl SseDecode for crate::api::nucleo::ChegadaDaCarta {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1210,6 +1395,27 @@ impl SseDecode for crate::api::nucleo::GradeDoQr {
     }
 }
 
+impl SseDecode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_i64::<NativeEndian>().unwrap()
+    }
+}
+
+impl SseDecode for Vec<crate::api::nucleo::CartaEntregue> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::nucleo::CartaEntregue>::sse_decode(
+                deserializer,
+            ));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::nucleo::ContatoDaAgenda> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1219,6 +1425,18 @@ impl SseDecode for Vec<crate::api::nucleo::ContatoDaAgenda> {
             ans_.push(<crate::api::nucleo::ContatoDaAgenda>::sse_decode(
                 deserializer,
             ));
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<Vec<u8>>::sse_decode(deserializer));
         }
         return ans_;
     }
@@ -1419,10 +1637,13 @@ fn pde_ffi_dispatcher_primary_impl(
             rust_vec_len,
             data_len,
         ),
-        28 => wire__crate__api__nucleo__init_app_impl(port, ptr, rust_vec_len, data_len),
-        29 => wire__crate__api__nucleo__nova_chave_avulsa_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__nucleo__procurar_segredos_impl(port, ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__nucleo__procurar_texto_impl(port, ptr, rust_vec_len, data_len),
+        29 => wire__crate__api__nucleo__init_app_impl(port, ptr, rust_vec_len, data_len),
+        30 => wire__crate__api__nucleo__nova_chave_avulsa_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__nucleo__procurar_segredos_impl(port, ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__nucleo__procurar_texto_impl(port, ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__nucleo__relay_busca_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__nucleo__relay_ler_entrega_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__nucleo__relay_publicacao_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1440,16 +1661,39 @@ fn pde_ffi_dispatcher_sync_impl(
         20 => wire__crate__api__nucleo__cofre_espera_segundos_impl(ptr, rust_vec_len, data_len),
         21 => wire__crate__api__nucleo__cofre_existe_impl(ptr, rust_vec_len, data_len),
         24 => wire__crate__api__nucleo__contatos_impl(ptr, rust_vec_len, data_len),
-        25 => wire__crate__api__nucleo__esquecer_identidade_impl(ptr, rust_vec_len, data_len),
-        26 => wire__crate__api__nucleo__gerar_codigo_contato_impl(ptr, rust_vec_len, data_len),
-        27 => wire__crate__api__nucleo__grade_propria_impl(ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__nucleo__versao_nucleo_impl(ptr, rust_vec_len, data_len),
+        25 => wire__crate__api__nucleo__dono_do_contato_impl(ptr, rust_vec_len, data_len),
+        26 => wire__crate__api__nucleo__esquecer_identidade_impl(ptr, rust_vec_len, data_len),
+        27 => wire__crate__api__nucleo__gerar_codigo_contato_impl(ptr, rust_vec_len, data_len),
+        28 => wire__crate__api__nucleo__grade_propria_impl(ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__nucleo__tem_conversa_impl(ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__nucleo__versao_nucleo_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
 
 // Section: rust2dart
 
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::nucleo::CartaEntregue {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.carta.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::nucleo::CartaEntregue
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::nucleo::CartaEntregue>
+    for crate::api::nucleo::CartaEntregue
+{
+    fn into_into_dart(self) -> crate::api::nucleo::CartaEntregue {
+        self
+    }
+}
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::nucleo::ChegadaDaCarta {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -1637,6 +1881,14 @@ impl SseEncode for bool {
     }
 }
 
+impl SseEncode for crate::api::nucleo::CartaEntregue {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<u8>>::sse_encode(self.id, serializer);
+        <Vec<u8>>::sse_encode(self.carta, serializer);
+    }
+}
+
 impl SseEncode for crate::api::nucleo::ChegadaDaCarta {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -1671,12 +1923,39 @@ impl SseEncode for crate::api::nucleo::GradeDoQr {
     }
 }
 
+impl SseEncode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_i64::<NativeEndian>(self).unwrap();
+    }
+}
+
+impl SseEncode for Vec<crate::api::nucleo::CartaEntregue> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::nucleo::CartaEntregue>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::nucleo::ContatoDaAgenda> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::nucleo::ContatoDaAgenda>::sse_encode(item, serializer);
+        }
+    }
+}
+
+impl SseEncode for Vec<Vec<u8>> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <Vec<u8>>::sse_encode(item, serializer);
         }
     }
 }
