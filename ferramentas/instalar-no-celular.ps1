@@ -394,9 +394,16 @@ try {
             }
             Passo "$modeloAtual : medidas da sonda zeradas" {
                 Rodar $adb @('-s', $s, 'shell', 'run-as', $Pacote, 'rm', '-f', $medidasSonda) | Out-Null
-                $existe = (Rodar $adb @('-s', $s, 'shell', 'run-as', $Pacote, 'sh', '-c', "if [ -e $medidasSonda ]; then echo SIM; else echo NAO; fi")).Trim()
-                if ($existe -ne 'NAO') { throw "o arquivo de medidas continuou no $modeloAtual ($existe)" }
-                "$medidasSonda apagado e conferido"
+                # Sem sh -c: o adb junta os argumentos numa linha e o shell do celular le de
+                # novo, e o ';' de um comando composto quebrava (teste de 08/11/2026). Um ls
+                # de um arquivo so, sem nada para o shell interpretar: "No such file" = apagado.
+                $antes = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try { $ls = (@(& $adb -s $s shell run-as $Pacote ls $medidasSonda 2>&1) | ForEach-Object { "$_" }) -join ' ' }
+                finally { $ErrorActionPreference = $antes }
+                if ($ls -match 'No such file') { "$medidasSonda apagado e conferido" }
+                elseif ($ls -match [regex]::Escape($medidasSonda)) { throw "o arquivo de medidas continuou no $modeloAtual" }
+                else { throw "nao consegui conferir o arquivo de medidas no $modeloAtual (run-as): $ls" }
             }
         }
 

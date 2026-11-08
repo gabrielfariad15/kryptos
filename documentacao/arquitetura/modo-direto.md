@@ -131,6 +131,8 @@ Códigos de FALHA: `ANDROID_ANTIGO`, `SEM_PERMISSAO`, `SEM_BLUETOOTH`, `BLUETOOT
   O `-LerSonda` não instala, não zera e não compila. A captura de tela não roda no Linux (System.Drawing só existe no Windows) e ficou fora dessa calibração.
 - Kotlin das três variantes compilado, e a suíte agora compila sempre (passo "kotlin do Android").
 
+- **Defeito que o celular achou e a calibração deixou passar (08/11/2026):** a conferência do arquivo zerado usava `run-as ... sh -c "if ...; then ...; fi"`. O `adb shell` junta os argumentos numa linha só, e o shell do celular lê essa linha de novo: o `;` quebrou o comando (`syntax error: unexpected 'then'`). O `adb` falso da calibração executava os argumentos direto, sem essa segunda leitura. Agora a conferência é um `ls` de um arquivo só, sem nada para o shell interpretar, e o `adb` falso imita a segunda leitura: com ele, o script anterior falha do mesmo jeito que no celular, e o corrigido passa. Casos errados: arquivo que não apagou, `run-as` que falha e resposta inesperada do `ls`. Nenhum outro `adb shell` do script tem caractere que o shell reinterprete.
+
 O que não dá para provar aqui: o Bluetooth de verdade. Isso é o teste abaixo.
 
 ## Teste da sonda
