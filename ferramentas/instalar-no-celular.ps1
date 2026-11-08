@@ -23,6 +23,11 @@
 # so aceita em app de debug) e com uma faixa laranja "TELA LIBERADA" em todas as telas.
 # A captura passa a ter de mostrar conteudo.
 #
+# -Relay com -TelaLivre: durante o teste manual, captura as telas dos dois celulares
+# sozinho, a cada linha nova do app no logcat (carta enviada, selada, nao abriu...) e a
+# cada 15 s. As capturas vao para uma pasta em Downloads e, no fim, num zip de nome
+# unico, pronto para anexar. Sem -TelaLivre a tela sai preta e nada e capturado.
+#
 # Captura: o app tem FLAG_SECURE, entao o centro da captura tem de sair preto. Isso e
 # conferido (a barra de status e a de navegacao sao do sistema e aparecem). A prova de
 # que a tela abriu passa a ser o processo vivo, o logcat limpo e a conferencia a olho.
@@ -54,6 +59,8 @@ $portaRelay = 18080
 $procRelay = $null
 $logsRelay = @()
 $comReverse = New-Object System.Collections.Generic.List[string]
+$jobCapturas = $null
+$pararCapturas = $null
 
 function Rodar([string]$Exe, [string[]]$Argumentos) {
     $antes = $ErrorActionPreference
@@ -277,9 +284,81 @@ try {
         # Teclas que sobraram do bloco colado no console (um Enter a mais) encerravam a
         # espera na hora, antes do teste. Limpa o que estiver no buffer e so aceita FIM.
         try { $Host.UI.RawUI.FlushInputBuffer() } catch { Write-Host "   aviso: nao consegui limpar o buffer do teclado ($($_.Exception.GetType().Name)); so FIM encerra" }
+        $pastaCapturas = $null
+        if ($TelaLivre) {
+            $pastaCapturas = Join-Path $Amb.downloads ('kryptos-teste-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+            New-Item -ItemType Directory -Path $pastaCapturas | Out-Null
+            $script:pararCapturas = Join-Path $pastaCapturas 'parar.sinal'
+            $alvos = @($aparelhos | ForEach-Object {
+                [pscustomobject]@{ Serial = $_.Serial; Nome = ($_.Modelo.ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-') }
+            })
+            $script:jobCapturas = Start-Job -ArgumentList $adb, $alvos, $pastaCapturas, $script:pararCapturas -ScriptBlock {
+                param($adb, $alvos, $pasta, $parar)
+                $registro = Join-Path $pasta 'eventos.txt'
+                $vistos = @{}
+                foreach ($a in $alvos) { $vistos[$a.Serial] = 0 }
+                $ultima = [datetime]::MinValue
+                $n = 0
+                while (-not (Test-Path -LiteralPath $parar)) {
+                    $eventos = @()
+                    foreach ($a in $alvos) {
+                        try {
+                            $linhas = @(& $adb -s $a.Serial logcat -d -v time -s flutter 2>$null | Where-Object { $_ -match 'Kryptos:' })
+                            if ($linhas.Count -gt $vistos[$a.Serial]) {
+                                foreach ($l in $linhas[$vistos[$a.Serial]..($linhas.Count - 1)]) {
+                                    $eventos += "$($a.Nome): " + ($l -replace '^.*Kryptos:\s*', '')
+                                }
+                                $vistos[$a.Serial] = $linhas.Count
+                            }
+                        } catch {
+                            Add-Content -LiteralPath $registro -Value "falha ao ler o logcat de $($a.Nome): $($_.Exception.Message)"
+                        }
+                    }
+                    $agora = Get-Date
+                    if ($eventos.Count -gt 0 -or ($agora - $ultima).TotalSeconds -ge 15) {
+                        # Depois de um evento, a tela leva um instante para redesenhar.
+                        if ($eventos.Count -gt 0) { Start-Sleep -Milliseconds 800 }
+                        $n++
+                        $tipo = if ($eventos.Count -gt 0) { 'evento' } else { 'periodica' }
+                        $hora = (Get-Date).ToString('HHmmss')
+                        foreach ($a in $alvos) {
+                            $arq = Join-Path $pasta ('{0:D3}-{1}-{2}-{3}.png' -f $n, $hora, $a.Nome, $tipo)
+                            try {
+                                & $adb -s $a.Serial shell screencap -p /sdcard/kryptos-captura.png 2>&1 | Out-Null
+                                & $adb -s $a.Serial pull /sdcard/kryptos-captura.png $arq 2>&1 | Out-Null
+                                & $adb -s $a.Serial shell rm -f /sdcard/kryptos-captura.png 2>&1 | Out-Null
+                                if (-not (Test-Path -LiteralPath $arq)) { throw 'a captura nao chegou' }
+                            } catch {
+                                Add-Content -LiteralPath $registro -Value "falha ao capturar $($a.Nome): $($_.Exception.Message)"
+                            }
+                        }
+                        $linha = ('{0:D3} {1} {2}' -f $n, (Get-Date).ToString('HH:mm:ss'), $tipo)
+                        if ($eventos.Count -gt 0) { $linha += ' | ' + ($eventos -join ' | ') }
+                        Add-Content -LiteralPath $registro -Value $linha
+                        $ultima = Get-Date
+                    }
+                    Start-Sleep -Milliseconds 1500
+                }
+            }
+            Write-Host "   capturando as telas sozinho em $pastaCapturas (a cada evento do app e a cada 15 s)"
+        }
         $inicioDaEspera = Get-Date
         do { $resposta = Read-Host 'Digite FIM para encerrar' } while ($resposta.Trim().ToUpperInvariant() -ne 'FIM')
         $resultados.Add("OK    espera do teste manual: $([math]::Round(((Get-Date) - $inicioDaEspera).TotalMinutes, 1)) min")
+        if ($jobCapturas) {
+            New-Item -ItemType File -Path $pararCapturas -Force | Out-Null
+            if (-not (Wait-Job -Job $jobCapturas -Timeout 30)) { Write-Host '   aviso: as capturas nao pararam em 30 s; parando a forca' }
+            $saidaJob = @(Receive-Job -Job $jobCapturas -ErrorAction Continue 2>&1)
+            foreach ($l in $saidaJob) { Write-Host "   capturas: $l" }
+            Remove-Job -Job $jobCapturas -Force
+            $script:jobCapturas = $null
+            Remove-Item -LiteralPath $pararCapturas -Force
+            $pngs = @(Get-ChildItem -LiteralPath $pastaCapturas -Filter *.png)
+            $zipCapturas = "$pastaCapturas.zip"
+            Compress-Archive -Path (Join-Path $pastaCapturas '*') -DestinationPath $zipCapturas
+            $kb = [math]::Round((Get-Item -LiteralPath $zipCapturas).Length / 1KB)
+            $resultados.Add("OK    capturas: $($pngs.Count) telas em $zipCapturas ($kb KB); roteiro em eventos.txt")
+        }
         $resultados.Add('OK    teste na mao terminado (o resultado e o que voce viu nos celulares)')
         # O logcat foi limpo ao abrir o app: aqui so entra a sessao do teste.
         foreach ($a in $aparelhos) {
@@ -294,6 +373,12 @@ try {
 } catch {
     $resultados.Add("FALHA $($_.Exception.Message)")
 } finally {
+    if ($jobCapturas) {
+        if ($pararCapturas) { New-Item -ItemType File -Path $pararCapturas -Force | Out-Null }
+        Stop-Job -Job $jobCapturas
+        Remove-Job -Job $jobCapturas -Force
+        Write-Host 'capturas paradas'
+    }
     foreach ($sRev in $comReverse) {
         $antes = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'

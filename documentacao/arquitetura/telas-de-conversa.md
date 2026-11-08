@@ -74,6 +74,8 @@ O script sobe o relay de teste, instala o app nos dois e fica esperando você di
 
 Para filmar ou capturar a tela durante o teste, acrescente `-TelaLivre`. O app sai sem FLAG_SECURE, com uma faixa laranja "TELA LIBERADA · SÓ TESTE" em todas as telas, e a captura do script passa a ter de mostrar conteúdo. Só vale em app de debug: no de produção, o Android recusa e a tela segura fica.
 
+Com `-Relay -TelaLivre`, o script também captura as telas dos dois celulares sozinho durante o teste: a cada linha nova do app no logcat (carta enviada, selada, não abriu) e a cada 15 s. As capturas e um `eventos.txt` com o roteiro do que aconteceu vão para uma pasta `kryptos-teste-<data>` em Downloads e, no fim, para um zip de mesmo nome, pronto para anexar.
+
 Roteiro (A e B são os dois celulares):
 
 1. Nos dois: abrir com o PIN. A Central mostra "RELAY LIGADO".
