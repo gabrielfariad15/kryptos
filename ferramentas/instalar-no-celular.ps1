@@ -20,13 +20,16 @@
 # celular (o app so grava codigos, nunca texto, chave ou codigo de contato: regra 8.2).
 # Os celulares ficam no cabo o tempo todo.
 #
-# -RelayPublico: o teste com os celulares fora do cabo (4G ou outra rede). Usa o relay
+# -RelayPublico: o teste com os celulares fora do cabo. Usa o relay
 # que o ferramentas\relay-publico.ps1 pos na internet pelo Tailscale Funnel, rodando em
 # outra janela: le o endereco https://...ts.net que ele gravou, confere o /saude e monta
 # o app com esse endereco. Sem adb reverse: o celular vai ao relay pela internet. O cabo
 # continua so para instalar, ler o logcat e capturar. A espera por FIM e as capturas sao
-# as mesmas do -Relay. Diz se o Wi-Fi de cada celular esta ligado (para o teste pelo 4G,
-# desligue). Nao combina com -Relay.
+# as mesmas do -Relay. Diz se o Wi-Fi de cada celular esta ligado: os celulares nao tem
+# Tailscale, entao no Wi-Fi de casa ou no 4G vao igual pela internet e pelo Funnel (no
+# teste de 08/11/2026, mandar desligar o Wi-Fi deixou celular sem dados moveis sem
+# internet nenhuma). A conferencia do /saude daqui passa pela tailnet deste PC: o caminho
+# publico e conferido no navegador do celular. Nao combina com -Relay.
 #
 # -TelaLivre: so para filmar e capturar no teste. Monta o app sem FLAG_SECURE (o Android
 # so aceita em app de debug) e com uma faixa laranja "TELA LIBERADA" em todas as telas.
@@ -194,7 +197,7 @@ try {
             finally { $ErrorActionPreference = $antes; Remove-Item -LiteralPath ([System.IO.Path]::GetTempPath() + 'kryptos-saude.txt') -Force -ErrorAction SilentlyContinue }
             if ($cod.Trim() -notmatch '200$') { throw "o relay em $e nao respondeu (/saude: $($cod.Trim())). O relay-publico.ps1 ainda esta aberto na outra janela?" }
             $script:enderecoPublico = $e
-            "$e, /saude 200"
+            "$e, /saude 200 a partir deste PC (pela tailnet; o caminho publico se confere no celular)"
         }
     }
 
@@ -257,14 +260,14 @@ try {
         }
 
         if ($RelayPublico) {
-            # So informa: o caminho e pela internet tanto no Wi-Fi quanto no 4G. Para
-            # provar que nao depende da rede de casa, o teste pede o Wi-Fi desligado.
+            # So informa: sem Tailscale no celular, o caminho e pela internet tanto no
+            # Wi-Fi quanto no 4G.
             Passo "$modeloAtual : rede" {
                 $w = ''
                 try { $w = ((Rodar $adb @('-s', $s, 'shell', 'cmd', 'wifi', 'status')) -split "`n")[0].Trim() }
                 catch { $w = "nao consegui ler ($($_.Exception.Message -split "`n" | Select-Object -First 1))" }
-                if ($w -match 'disabled') { 'Wi-Fi desligado: vai pelo 4G' }
-                elseif ($w -match 'enabled') { 'Wi-Fi LIGADO: para o teste pelo 4G, desligue o Wi-Fi deste celular' }
+                if ($w -match 'disabled') { 'Wi-Fi desligado: so os dados moveis (confira que funcionam)' }
+                elseif ($w -match 'enabled') { 'Wi-Fi ligado: vai pela internet e pelo Funnel' }
                 else { "Wi-Fi: $w" }
             }
         }
@@ -333,6 +336,7 @@ try {
         } else {
             Write-Host "Apps montados com o relay $enderecoPublico. Faca o roteiro do teste fora do cabo"
             Write-Host '(documentacao/arquitetura/relay-publico.md) e digite FIM aqui quando terminar.'
+            Write-Host "Antes, no navegador de cada celular: $enderecoPublico/saude (tem de aparecer: ok)"
             Write-Host 'O relay continua no ar na outra janela ate o FIM de la.'
         }
         # Teclas que sobraram do bloco colado no console (um Enter a mais) encerravam a

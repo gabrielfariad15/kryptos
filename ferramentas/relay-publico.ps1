@@ -1,6 +1,7 @@
 # ferramentas/relay-publico.ps1
 # Poe o relay do Kryptos na internet a partir deste PC, pelo Tailscale Funnel, para o
-# teste com os celulares fora do cabo (4G ou outra rede). Fica no ar ate voce digitar FIM.
+# teste com os celulares fora do cabo (Wi-Fi de casa ou 4G: os celulares nao tem
+# Tailscale, entao os dois vao pela internet). Fica no ar ate voce digitar FIM.
 #
 # Uso (uma linha, numa janela propria; o instalar-no-celular.ps1 roda em outra):
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\relay-publico.ps1
@@ -13,8 +14,8 @@
 #   2. confere que a porta 443 do Funnel nao esta servindo outra coisa;
 #   3. compila o relay (release) e sobe so em 127.0.0.1, com o malote em arquivo;
 #   4. liga o Funnel na 443 apontando para o relay e le a configuracao de volta;
-#   5. confere o /saude por dentro (pela tailnet) e por fora (DNS publico, pelo
-#      servidor do Funnel, como o celular no 4G vai fazer);
+#   5. confere o /saude por dentro (pela tailnet) e por fora (DNS publico perguntado
+#      por HTTPS, pelo servidor do Funnel, como o celular sem Tailscale vai fazer);
 #   6. grava o endereco num arquivo que o instalar-no-celular.ps1 -RelayPublico le;
 #   7. espera FIM. No fim desliga o Funnel (e le de volta), apaga o arquivo do endereco,
 #      desliga o relay e mostra as ultimas linhas do log dele (o relay nao grava chave,
@@ -29,7 +30,11 @@
 # novo (ele reaproveita a configuracao) ou: tailscale funnel --https=443 off
 
 [CmdletBinding()]
-param()
+param(
+    # Quanto esperar o caminho publico responder (o DNS publico pode levar ate 10 min
+    # na primeira vez). Pelo menos uma tentativa e feita mesmo com 0.
+    [int]$MinutosPorFora = 10
+)
 
 $ErrorActionPreference = 'Stop'
 $Repo = Split-Path -Parent $PSScriptRoot
@@ -98,6 +103,28 @@ function Saude([string]$Url, [string[]]$Extra, [ref]$Erro) {
     }
     $Erro.Value = $texto
     return 0
+}
+
+# IPs (registros A) do nome no DNS publico, pela consulta DNS sobre HTTPS do 1.1.1.1.
+# Lista vazia quando nao ha; o motivo da falha volta em $Erro.
+function IpsPublicos([string]$NomeDns, [ref]$Erro) {
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $saida = & (NomeDoCurl) -sS --max-time 15 -H 'accept: application/dns-json' "https://cloudflare-dns.com/dns-query?name=$NomeDns&type=A" 2>&1
+        $codigo = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $antes }
+    $texto = (@($saida | ForEach-Object { "$_" }) -join ' ').Trim()
+    if ($codigo -ne 0) { $Erro.Value = "consulta ao DNS publico falhou: $texto"; return @() }
+    try { $r = $texto | ConvertFrom-Json } catch { $Erro.Value = "resposta do DNS publico ilegivel: $($_.Exception.Message)"; return @() }
+    return @(@($r.Answer) | Where-Object { $_ -and $_.type -eq 1 } | ForEach-Object { "$($_.data)" })
+}
+
+# IP da tailnet: 100.64.0.0/10 (a faixa que o Tailscale usa).
+function DaTailnet([string]$Ip) {
+    $p = $Ip.Split('.')
+    if ($p.Count -ne 4) { return $false }
+    return ([int]$p[0] -eq 100 -and [int]$p[1] -ge 64 -and [int]$p[1] -le 127)
 }
 
 # Configuracao do Funnel/Serve deste PC, ja como objeto (vazia quando nao ha nada).
@@ -255,35 +282,36 @@ try {
         'HTTP 200, certificado valido'
     }
 
+    # Por fora: o IP vem do DNS publico perguntado por HTTPS (DNS sobre HTTPS do 1.1.1.1),
+    # nao pelo DNS do Windows. Com o Tailscale ligado, o Windows desvia as consultas de
+    # *.ts.net para o DNS do Tailscale, que devolve o IP da tailnet: no teste de
+    # 08/11/2026 o "por fora" passou por 100.89.224.80, o proprio PC, e nao provou nada.
+    # IP da tailnet (100.64.0.0/10) nunca conta como caminho publico.
     $porFora = $false
-    if (-not (Get-Command Resolve-DnsName -ErrorAction SilentlyContinue)) {
-        $resultados.Add('AVISO saude por fora nao conferida: falta o Resolve-DnsName (so existe no Windows)')
-    } else {
-        Write-Host '.. saude por fora (DNS publico, pelo servidor do Funnel)'
-        Write-Host '   o DNS publico do nome pode levar ate 10 min na primeira vez; confiro a cada 20 s'
+    Write-Host '.. saude por fora (DNS publico, pelo servidor do Funnel)'
+    Write-Host '   o DNS publico do nome pode levar ate 10 min na primeira vez; confiro a cada 20 s'
+    $ipUsado = $null
+    $motivo = ''
+    $limite = (Get-Date).AddMinutes($MinutosPorFora)
+    do {
         $motivo = ''
-        $ip = $null
-        $limite = (Get-Date).AddMinutes(10)
-        while (-not $porFora -and (Get-Date) -lt $limite) {
-            try {
-                $ip = @(Resolve-DnsName -Name $script:NomeDoPc -Type A -Server 1.1.1.1 -DnsOnly -ErrorAction Stop |
-                    Where-Object { $_.Type -eq 'A' } | ForEach-Object { $_.IPAddress })[0]
-            } catch {
-                $ip = $null
-                $motivo = "DNS publico ainda sem o nome ($($_.Exception.Message))"
-            }
-            if ($ip) {
-                # --resolve: vai ao IP do servidor do Funnel achado no DNS publico, sem
-                # passar pelo MagicDNS deste PC. E o caminho do celular no 4G.
-                $cod = Saude "$endereco/saude" @('--resolve', "$($script:NomeDoPc):443:$ip") ([ref]$motivo)
-                if ($cod -eq 200) { $porFora = $true; break }
-            }
-            Write-Host "   ainda nao ($motivo)"
-            Start-Sleep -Seconds 20
+        $ips = @(IpsPublicos $script:NomeDoPc ([ref]$motivo))
+        $fora = @($ips | Where-Object { -not (DaTailnet $_) })
+        if ($ips.Count -gt 0 -and $fora.Count -eq 0) { $motivo = "o DNS publico so devolveu IP da tailnet ($($ips -join ', '))" }
+        elseif ($fora.Count -eq 0 -and -not $motivo) { $motivo = 'o DNS publico ainda nao tem o nome' }
+        foreach ($ip in $fora) {
+            # --resolve: vai ao IP do servidor do Funnel achado no DNS publico, sem passar
+            # pelo DNS deste PC. E o caminho do celular sem Tailscale.
+            $cod = Saude "$endereco/saude" @('--resolve', "$($script:NomeDoPc):443:$ip") ([ref]$motivo)
+            if ($cod -eq 200) { $porFora = $true; $ipUsado = $ip; break }
         }
-        if ($porFora) { $resultados.Add("OK    saude por fora (DNS publico, pelo servidor do Funnel)  (HTTP 200 via $ip)") }
-        else { $resultados.Add("AVISO saude por fora nao respondeu em 10 min ($motivo). O relay fica no ar; o celular tenta de novo a cada 10 s") }
-    }
+        if (-not $porFora) {
+            Write-Host "   ainda nao ($motivo)"
+            if ((Get-Date).AddSeconds(20) -lt $limite) { Start-Sleep -Seconds 20 } else { break }
+        }
+    } while (-not $porFora)
+    if ($porFora) { $resultados.Add("OK    saude por fora (DNS publico, pelo servidor do Funnel)  (HTTP 200 via $ipUsado)") }
+    else { $resultados.Add("AVISO saude por fora nao conferida em $MinutosPorFora min ($motivo). O relay fica no ar; confira no navegador do celular: $endereco/saude") }
 
     # ---------- 6. endereco para o instalar-no-celular.ps1 ----------
     Passo 'endereco gravado para o instalar-no-celular.ps1' {
@@ -300,6 +328,7 @@ try {
     Write-Host "RELAY NA INTERNET: $endereco"
     Write-Host 'Em outra janela:'
     Write-Host '  powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -RelayPublico -TelaLivre'
+    Write-Host "Antes do teste, no navegador do celular: $endereco/saude (tem de aparecer: ok)"
     Write-Host 'Deixe esta janela aberta durante o teste e digite FIM aqui quando terminar.'
     try { $Host.UI.RawUI.FlushInputBuffer() } catch { Write-Host "   aviso: nao consegui limpar o buffer do teclado ($($_.Exception.GetType().Name)); so FIM encerra" }
     $inicio = Get-Date
