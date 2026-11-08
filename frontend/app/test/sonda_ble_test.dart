@@ -12,10 +12,15 @@ import 'apoio.dart';
 const canal = MethodChannel('kryptos/sonda-ble-teste');
 
 class AndroidFalso {
-  AndroidFalso({this.permite = true, this.recusarProcura = false});
+  AndroidFalso({
+    this.permite = true,
+    this.recusarProcura = false,
+    this.semMedidas = false,
+  });
 
   final bool permite;
   final bool recusarProcura;
+  final bool semMedidas;
   final chamadas = <MethodCall>[];
 
   Future<Object?> responder(MethodCall c) async {
@@ -28,6 +33,9 @@ class AndroidFalso {
       case 'procurar':
         if (recusarProcura) throw PlatformException(code: 'ARGUMENTO');
         return null;
+      case 'compartilhar':
+        if (semMedidas) throw PlatformException(code: 'SEM_MEDIDAS');
+        return 61;
       default:
         return null;
     }
@@ -182,6 +190,33 @@ void main() {
     await tester.tap(find.byKey(const Key('sonda-tentar')));
     await tester.pumpAndSettle();
     expect(a.metodos, ['permissoes', 'permissoes']);
+  });
+
+  testWidgets(
+    'ENVIAR MEDIDAS pede o compartilhar; travado com a sonda ocupada',
+    (tester) async {
+      final a = await montar(tester, AndroidFalso());
+      await doAndroid(tester, 'ocupado', true);
+      await tester.tap(find.byKey(const Key('sonda-compartilhar')));
+      await tester.pumpAndSettle();
+      expect(
+        a.metodos,
+        isNot(contains('compartilhar')),
+        reason: 'compartilhar tira o app da frente e pararia a rodada',
+      );
+      await doAndroid(tester, 'ocupado', false);
+      await tester.tap(find.byKey(const Key('sonda-compartilhar')));
+      await tester.pumpAndSettle();
+      expect(a.chamadas.last.method, 'compartilhar');
+      expect(find.byKey(const Key('sonda-erro')), findsNothing);
+    },
+  );
+
+  testWidgets('ENVIAR MEDIDAS sem medidas: mostra o código', (tester) async {
+    await montar(tester, AndroidFalso(semMedidas: true));
+    await tester.tap(find.byKey(const Key('sonda-compartilhar')));
+    await tester.pumpAndSettle();
+    expect(find.text('ERRO SEM_MEDIDAS'), findsOneWidget);
   });
 
   testWidgets('Android recusa: mostra o código, não derruba a tela', (

@@ -96,6 +96,7 @@ Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige And
 - **CALIBRAR:** como o PROCURAR, com 3 idas e voltas: na 1ª um byte trocado, na 2ª um pedaço a menos, na 3ª nada. Esperado: `SHA_NAO_CONFERE`, `PEDACO_FALTANDO` e `CONFERIU`, nos dois sentidos. Sem calibração OK, a análise dá FALHA (regra 5.3).
 - **AMBOS (segunda rodada):** os dois papéis ao mesmo tempo; o desempate é uma espera aleatória de até 1,5 s antes de conectar, sem nenhum dado a mais no anúncio.
 - **Ciclo de vida:** a tela fica acesa enquanto a sonda está aberta. Se o app sai da frente, a sonda para tudo (`APP_SAIU_DA_FRENTE`).
+- **ENVIAR MEDIDAS:** abre o "Compartilhar" do Android com o arquivo de medidas inteiro, em texto (WhatsApp, e-mail, copiar). Só com a sonda parada, porque abrir a escolha tira o app da frente. Até 400 KB; acima disso, use o `-LerSonda`. Sem medidas, a tela mostra `ERRO SEM_MEDIDAS`.
 
 **Variáveis**, escolhidas na tela, uma por rodada: PHY (1M, 2M, CODED), prioridade (PADRAO, ALTA) e a distância declarada (1, 5, 10, 15, 20, 30 m).
 

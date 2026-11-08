@@ -206,6 +206,14 @@ class _TelaSondaBleState extends State<TelaSondaBle> {
                     _permitido == true,
                     () => _chamar('parar'),
                   ),
+                  // Abre o "Compartilhar" do Android com o arquivo de medidas inteiro, em
+                  // texto. Só com a sonda parada: abrir a escolha tira o app da frente.
+                  _botao(
+                    'ENVIAR MEDIDAS',
+                    'sonda-compartilhar',
+                    !_ocupado,
+                    () => _chamar('compartilhar'),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),

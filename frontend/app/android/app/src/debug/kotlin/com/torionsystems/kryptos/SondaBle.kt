@@ -23,6 +23,7 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
@@ -91,6 +92,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         const val TENTATIVAS_OCUPADO_MAX = 5_000
         const val ARQUIVO = "sonda-ble.txt"
         const val ARQUIVO_MAX_BYTES = 2L * 1024 * 1024
+        // O texto vai num Intent; acima de ~1 MB o Android recusa (TransactionTooLarge).
+        // Estimo uma sessão inteira em dezenas de KB (a de 08/11/2026 teve 12 KB).
+        const val COMPARTILHAR_MAX_BYTES = 400_000L
 
         val PERMISSOES = arrayOf(
             Manifest.permission.BLUETOOTH_SCAN,
@@ -168,7 +172,51 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 }
             }
             "parar" -> h.post { parar("PEDIDO"); principal.post { result.success(null) } }
+            "compartilhar" -> h.post { compartilhar(result) }
             else -> result.notImplemented()
+        }
+    }
+
+    // ---------- enviar as medidas como texto ----------
+
+    /**
+     * Abre o "Compartilhar" do Android com o arquivo de medidas inteiro, como texto (para
+     * mandar pelo WhatsApp, por exemplo). Só códigos e números (regra 8.2). Abrir a escolha
+     * tira o app da frente, então a sonda para o que estiver fazendo: a tela só deixa
+     * compartilhar com a sonda parada.
+     */
+    private fun compartilhar(result: MethodChannel.Result) {
+        val tamanho = arquivo.length()
+        if (!arquivo.exists() || tamanho == 0L) {
+            principal.post { result.error("SEM_MEDIDAS", "o arquivo de medidas esta vazio", null) }
+            return
+        }
+        if (tamanho > COMPARTILHAR_MAX_BYTES) {
+            principal.post { result.error("GRANDE_DEMAIS", "$tamanho bytes: use o -LerSonda no PC", null) }
+            return
+        }
+        val texto = try {
+            arquivo.readText(Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.e(TAG, "FALHA sonda-ble LER_ARQUIVO ${e.javaClass.simpleName}")
+            principal.post { result.error("LER_ARQUIVO", e.javaClass.simpleName, null) }
+            return
+        }
+        val linhas = texto.count { it == '\n' }
+        val modelo = Build.MODEL.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        principal.post {
+            try {
+                val envio = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "kryptos-sonda-$modelo")
+                    putExtra(Intent.EXTRA_TEXT, "kryptos-sonda-$modelo ($linhas linhas)\n$texto")
+                }
+                activity.startActivity(Intent.createChooser(envio, "Enviar as medidas da sonda"))
+                result.success(linhas)
+            } catch (e: Exception) {
+                Log.e(TAG, "FALHA sonda-ble COMPARTILHAR ${e.javaClass.simpleName}")
+                result.error("COMPARTILHAR", e.javaClass.simpleName, null)
+            }
         }
     }
 
