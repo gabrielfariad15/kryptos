@@ -68,7 +68,6 @@ class Plantao extends ChangeNotifier {
   bool _caixaCheia = false;
   String? _falhaDoRelay;
   String? _falhaDaCaixa;
-  final _chegouEm = <int, DateTime>{};
   final _lidaEm = <int, DateTime>{};
   final _enviadas = <Enviada>[];
   int _proximaEnviada = 1;
@@ -91,9 +90,14 @@ class Plantao extends ChangeNotifier {
 
   DateTime agora() => _relogio();
 
-  /// Quando a mensagem chegou: a hora gravada no índice da caixa ou, numa caixa
-  /// antiga, quando apareceu nesta execução.
-  DateTime? chegouEm(int gaveta) => _chegouEm[gaveta];
+  /// Quando a mensagem chegou, pela hora gravada no índice da caixa. Nada numa caixa
+  /// antiga, sem hora gravada: a tela mostra "--:--" em vez de inventar uma hora.
+  DateTime? chegouEm(int gaveta) {
+    for (final s in _seladas) {
+      if (s.gaveta == gaveta) return s.chegada;
+    }
+    return null;
+  }
 
   /// Quando a mensagem foi aberta pela primeira vez nesta execução.
   DateTime? lidaEm(int gaveta) => _lidaEm[gaveta];
@@ -296,12 +300,7 @@ class Plantao extends ChangeNotifier {
     return _tentar('listar', () async {
       final lista = await mensageiro.listar();
       final naoAbertas = await mensageiro.naoAbertas();
-      final agora = this.agora();
       final gavetas = {for (final s in lista) s.gaveta};
-      for (final s in lista) {
-        _chegouEm.putIfAbsent(s.gaveta, () => s.chegada ?? agora);
-      }
-      _chegouEm.removeWhere((g, _) => !gavetas.contains(g));
       _lidaEm.removeWhere((g, _) => !gavetas.contains(g));
       final mudou = naoAbertas != _naoAbertas || !_mesmaLista(lista, _seladas);
       _seladas = lista;

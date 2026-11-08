@@ -295,8 +295,11 @@ try {
             $script:jobCapturas = Start-Job -ArgumentList $adb, $alvos, $pastaCapturas, $script:pararCapturas -ScriptBlock {
                 param($adb, $alvos, $pasta, $parar)
                 $registro = Join-Path $pasta 'eventos.txt'
-                $vistos = @{}
-                foreach ($a in $alvos) { $vistos[$a.Serial] = 0 }
+                # Ultima linha do app ja vista em cada celular. Pelo conteudo, nao pela
+                # contagem: quando o app reabre, o logcat do celular pode recomecar
+                # (visto em 08/11/2026) e a contagem antiga escondia os eventos novos.
+                $ultimaVista = @{}
+                foreach ($a in $alvos) { $ultimaVista[$a.Serial] = $null }
                 $ultima = [datetime]::MinValue
                 $n = 0
                 while (-not (Test-Path -LiteralPath $parar)) {
@@ -304,11 +307,18 @@ try {
                     foreach ($a in $alvos) {
                         try {
                             $linhas = @(& $adb -s $a.Serial logcat -d -v time -s flutter 2>$null | Where-Object { $_ -match 'Kryptos:' })
-                            if ($linhas.Count -gt $vistos[$a.Serial]) {
-                                foreach ($l in $linhas[$vistos[$a.Serial]..($linhas.Count - 1)]) {
-                                    $eventos += "$($a.Nome): " + ($l -replace '^.*Kryptos:\s*', '')
+                            if ($linhas.Count -gt 0) {
+                                $inicio = 0
+                                $vistaAntes = $ultimaVista[$a.Serial]
+                                if ($null -ne $vistaAntes) {
+                                    $pos = [array]::LastIndexOf($linhas, $vistaAntes)
+                                    # Achou: so o que veio depois. Nao achou: o logcat recomecou e tudo e novo.
+                                    if ($pos -ge 0) { $inicio = $pos + 1 }
                                 }
-                                $vistos[$a.Serial] = $linhas.Count
+                                for ($k = $inicio; $k -lt $linhas.Count; $k++) {
+                                    $eventos += "$($a.Nome): " + ($linhas[$k] -replace '^.*Kryptos:\s*', '')
+                                }
+                                $ultimaVista[$a.Serial] = $linhas[$linhas.Count - 1]
                             }
                         } catch {
                             Add-Content -LiteralPath $registro -Value "falha ao ler o logcat de $($a.Nome): $($_.Exception.Message)"

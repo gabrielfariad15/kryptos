@@ -493,8 +493,9 @@ void main() {
         agenda: agendaCom([amigo]),
       );
       await abrirConversa(tester, amigo);
-      expect(find.text('MSG 01 · RX 20:09'), findsOneWidget);
-      expect(find.text('MSG 02 · RX 20:14'), findsOneWidget);
+      // a de caixa antiga, sem hora, vem antes e não inventa hora
+      expect(find.text('MSG 01 · RX --:--'), findsOneWidget);
+      expect(find.text('MSG 02 · RX 20:09'), findsOneWidget);
     },
   );
 

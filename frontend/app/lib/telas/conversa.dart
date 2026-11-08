@@ -55,7 +55,10 @@ class _Linha {
 
   final Selada? selada;
   final Enviada? enviada;
-  final DateTime em;
+
+  /// Hora de chegada (recebida) ou de envio (enviada). Nada: recebida de uma caixa
+  /// antiga, sem hora gravada; vem antes das outras, porque é mais antiga.
+  final DateTime? em;
 
   String get id =>
       selada != null ? 'rx-${selada!.gaveta}' : 'tx-${enviada!.numero}';
@@ -117,13 +120,16 @@ class _ConversaState extends State<Conversa> {
     final p = widget.plantao;
     final linhas = <_Linha>[
       for (final s in p.seladasDe(widget.codigo))
-        _Linha.recebida(s, p.chegouEm(s.gaveta) ?? p.agora()),
+        _Linha.recebida(s, p.chegouEm(s.gaveta)),
       for (final e in p.enviadasPara(widget.codigo)) _Linha.enviada(e),
     ];
     // Estável: a ordem da caixa vale entre recebidas da mesma hora.
     final ordem = {for (var i = 0; i < linhas.length; i++) linhas[i]: i};
     linhas.sort((a, b) {
-      final c = a.em.compareTo(b.em);
+      final (ea, eb) = (a.em, b.em);
+      final c = ea == null || eb == null
+          ? (ea == null ? 0 : 1) - (eb == null ? 0 : 1)
+          : ea.compareTo(eb);
       return c != 0 ? c : ordem[a]!.compareTo(ordem[b]!);
     });
     return linhas;
@@ -377,7 +383,10 @@ class _Mensagem extends StatelessWidget {
   Widget build(BuildContext context) {
     final selada = linha.selada;
     final enviada = linha.enviada;
-    final hora = '${_duasCasas(linha.em.hour)}:${_duasCasas(linha.em.minute)}';
+    final em = linha.em;
+    final hora = em == null
+        ? '--:--'
+        : '${_duasCasas(em.hour)}:${_duasCasas(em.minute)}';
     final sentido = enviada != null ? 'TX' : 'RX';
     final String meta;
     final bool queimando;

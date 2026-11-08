@@ -221,6 +221,9 @@ class MensageiroFalso implements Mensageiro {
 
   final caixa = <GuardadaFalsa>[];
   final enviadas = <(String, List<int>)>[];
+
+  /// Hora de chegada que o núcleo grava nas cartas que o [buscar] traz.
+  DateTime Function() agora = DateTime.now;
   final chamadas = <String>[];
 
   /// Cartas que o próximo [buscar] traz (cada uma vira uma gaveta).
@@ -257,7 +260,7 @@ class MensageiroFalso implements Mensageiro {
     if (f != null) throw f;
     final n = noRelay.length;
     for (final (remetente, texto) in noRelay) {
-      guardar(remetente, texto);
+      guardar(remetente, texto, chegada: agora());
     }
     noRelay.clear();
     return Recebidas(seladas: n, naoAbriram: 0, caixaCheia: false);
@@ -478,6 +481,7 @@ Future<Plantao> abrirCentral(
   // Cada teste começa com o app na frente, mesmo que o anterior tenha terminado no
   // fundo (ainda não há quem escute o ciclo de vida: o salto direto não quebra nada).
   tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  mensageiro.agora = relogio.call;
   final plantao = Plantao(mensageiro: mensageiro, relogio: relogio.call);
   await tester.pumpWidget(
     DonoDoPlantao(
