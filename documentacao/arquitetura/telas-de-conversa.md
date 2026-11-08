@@ -70,7 +70,11 @@ Os dois celulares no cabo do mesmo computador. Uma linha:
 powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay
 ```
 
-O script sobe o relay de teste, instala o app nos dois e fica esperando o Enter. Roteiro (A e B são os dois celulares):
+O script sobe o relay de teste, instala o app nos dois e fica esperando o Enter. Depois do Enter, desliga o relay e mostra as linhas do app no logcat de cada celular (só códigos, regra 8.2).
+
+Para filmar ou capturar a tela durante o teste, acrescente `-TelaLivre`. O app sai sem FLAG_SECURE, com uma faixa laranja "TELA LIBERADA · SÓ TESTE" em todas as telas, e a captura do script passa a ter de mostrar conteúdo. Só vale em app de debug: no de produção, o Android recusa e a tela segura fica.
+
+Roteiro (A e B são os dois celulares):
 
 1. Nos dois: abrir com o PIN. A Central mostra "RELAY LIGADO".
 2. Frente a frente: em NOVO CONTATO, A lê o QR de B e B lê o QR de A.

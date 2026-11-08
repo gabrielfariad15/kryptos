@@ -8,13 +8,20 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Serial <serial>
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay -TelaLivre
 #
 # Sem parametro: exige um unico celular no cabo. Com mais de um, use -Todos ou -Serial.
 #
 # -Relay: o teste com os dois celulares. Sobe o relay de teste nesta maquina (so em
 # 127.0.0.1, malote na memoria), monta o app com o endereco dele, liga a porta a cada
 # celular pelo adb reverse e fica esperando o Enter enquanto o teste e feito na mao.
-# No fim desliga o relay e desfaz os reverses. Os celulares ficam no cabo o tempo todo.
+# No fim desliga o relay, desfaz os reverses e mostra as linhas do app no logcat de cada
+# celular (o app so grava codigos, nunca texto, chave ou codigo de contato: regra 8.2).
+# Os celulares ficam no cabo o tempo todo.
+#
+# -TelaLivre: so para filmar e capturar no teste. Monta o app sem FLAG_SECURE (o Android
+# so aceita em app de debug) e com uma faixa laranja "TELA LIBERADA" em todas as telas.
+# A captura passa a ter de mostrar conteudo.
 #
 # Captura: o app tem FLAG_SECURE, entao o centro da captura tem de sair preto. Isso e
 # conferido (a barra de status e a de navegacao sao do sistema e aparecem). A prova de
@@ -25,7 +32,8 @@
 param(
     [switch]$Todos,
     [string]$Serial,
-    [switch]$Relay
+    [switch]$Relay,
+    [switch]$TelaLivre
 )
 
 $ErrorActionPreference = 'Stop'
@@ -156,10 +164,12 @@ try {
         Write-Host '   Gradle + Rust para Android; a primeira vez demora'
         $argsBuild = @('build', 'apk', '--debug', '--target-platform', 'android-arm64')
         if ($Relay) { $argsBuild += "--dart-define=KRYPTOS_RELAY=http://127.0.0.1:$portaRelay" }
+        if ($TelaLivre) { $argsBuild += '--dart-define=KRYPTOS_TELA_LIVRE=true' }
         Rodar $flutter $argsBuild | Out-Null
         if (-not (Test-Path -LiteralPath $apk)) { throw "o build terminou mas nao achei $apk" }
         $comRelay = if ($Relay) { 'com o relay de teste' } else { 'sem relay' }
-        "$([math]::Round((Get-Item -LiteralPath $apk).Length / 1MB, 1)) MB, $comRelay"
+        $comTela = if ($TelaLivre) { 'TELA LIVRE (sem FLAG_SECURE)' } else { 'tela segura' }
+        "$([math]::Round((Get-Item -LiteralPath $apk).Length / 1MB, 1)) MB, $comRelay, $comTela"
     }
 
     # ---------- em cada celular ----------
@@ -249,8 +259,13 @@ try {
                     }
                 }
             } finally { $img.Dispose() }
-            if ($acesos -gt 0) { throw "$acesos de $total pontos do centro da captura tem conteudo: o FLAG_SECURE nao valeu ($destino)" }
-            "$destino, $([math]::Round($b.Length / 1KB)) KB; centro preto ($total de $total pontos): FLAG_SECURE valendo"
+            if ($TelaLivre) {
+                if ($acesos -eq 0) { throw "captura preta com -TelaLivre: a tela nao foi liberada ($destino)" }
+                "$destino, $([math]::Round($b.Length / 1KB)) KB; centro com conteudo ($acesos de $total pontos): tela liberada para o teste"
+            } else {
+                if ($acesos -gt 0) { throw "$acesos de $total pontos do centro da captura tem conteudo: o FLAG_SECURE nao valeu ($destino)" }
+                "$destino, $([math]::Round($b.Length / 1KB)) KB; centro preto ($total de $total pontos): FLAG_SECURE valendo"
+            }
         }
     }
 
@@ -261,6 +276,13 @@ try {
         Write-Host 'e aperte Enter aqui quando terminar. O relay desliga e os reverses saem.'
         [void](Read-Host)
         $resultados.Add('OK    teste na mao terminado (o resultado e o que voce viu nos celulares)')
+        # O logcat foi limpo ao abrir o app: aqui so entra a sessao do teste.
+        foreach ($a in $aparelhos) {
+            $log = @((Rodar $adb @('-s', $a.Serial, 'logcat', '-d', '-v', 'time', '-s', 'flutter')) -split "`n" |
+                Where-Object { $_ -match '\S' -and $_ -notmatch '^-+ beginning of' })
+            $resultados.Add("..    $($a.Modelo) : $($log.Count) linhas do app no logcat (ultimas 60)")
+            foreach ($l in ($log | Select-Object -Last 60)) { $resultados.Add("      $($l.Trim())") }
+        }
     }
 
     $ok = $true

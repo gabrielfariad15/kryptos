@@ -1,5 +1,6 @@
 package com.torionsystems.kryptos
 
+import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -19,13 +20,24 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, ChaveDoAparelho.CANAL)
             .setMethodCallHandler(ChaveDoAparelho(applicationContext))
-        // So para o teste no aparelho conferir a protecao na janela de verdade.
+        // "segura": o teste no aparelho confere a protecao na janela de verdade.
+        // "liberar": tira a protecao para filmar e capturar no teste. So em app de
+        // debug; no de producao a tela segura nao sai.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CANAL_TELA)
             .setMethodCallHandler { chamada, resposta ->
                 when (chamada.method) {
                     "segura" -> resposta.success(
                         (window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE) != 0
                     )
+                    "liberar" -> {
+                        val debug = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                        if (debug) {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                            resposta.success(null)
+                        } else {
+                            resposta.error("TELA_SEGURA_OBRIGATORIA", "so em app de debug", null)
+                        }
+                    }
                     else -> resposta.notImplemented()
                 }
             }

@@ -25,6 +25,7 @@ class KryptosApp extends StatelessWidget {
     required this.agenda,
     required this.abrirCamera,
     required this.mensageiro,
+    this.telaLivre = false,
   });
 
   final String versaoNucleo;
@@ -34,12 +35,19 @@ class KryptosApp extends StatelessWidget {
   final AbrirCamera abrirCamera;
   final Mensageiro mensageiro;
 
+  /// Tela sem FLAG_SECURE (só build de teste, para filmar e capturar): uma faixa
+  /// laranja fica por cima de todas as telas, para nunca passar por app de verdade.
+  final bool telaLivre;
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Kryptos',
       debugShowCheckedModeBanner: false,
       theme: temaKryptos(),
+      builder: telaLivre
+          ? (context, tela) => Stack(children: [?tela, const _FaixaTelaLivre()])
+          : null,
       home: _Entrada(
         versaoNucleo: versaoNucleo,
         gerarCodigo: gerarCodigo,
@@ -47,6 +55,37 @@ class KryptosApp extends StatelessWidget {
         agenda: agenda,
         abrirCamera: abrirCamera,
         mensageiro: mensageiro,
+      ),
+    );
+  }
+}
+
+class _FaixaTelaLivre extends StatelessWidget {
+  const _FaixaTelaLivre();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: MediaQuery.viewPaddingOf(context).top,
+      left: 0,
+      right: 0,
+      child: IgnorePointer(
+        child: Container(
+          key: const Key('faixa-tela-livre'),
+          height: 14,
+          alignment: Alignment.center,
+          color: Cores.laranja,
+          child: const Text(
+            'TELA LIBERADA · SÓ TESTE · PRINT PERMITIDO',
+            style: TextStyle(
+              fontFamily: fonte,
+              fontSize: 9,
+              letterSpacing: 1,
+              color: Cores.fundo,
+              decoration: TextDecoration.none,
+            ),
+          ),
+        ),
       ),
     );
   }
