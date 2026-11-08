@@ -41,6 +41,23 @@ class MainActivity : FlutterActivity() {
                     else -> resposta.notImplemented()
                 }
             }
+        // Canais so do app de debug (sonda BLE); vazio no profile e no release.
+        CanaisDeTeste.registrar(this, flutterEngine)
+    }
+
+    override fun onPause() {
+        CanaisDeTeste.aoPausar()
+        super.onPause()
+    }
+
+    override fun onDestroy() {
+        CanaisDeTeste.aoDestruir()
+        super.onDestroy()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        CanaisDeTeste.aoResultadoDePermissao(requestCode)
     }
 
     companion object {

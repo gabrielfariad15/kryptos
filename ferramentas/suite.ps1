@@ -1,6 +1,7 @@
 # ferramentas/suite.ps1
 # Suite do Kryptos: tudo o que precisa estar verde antes de um commit (regra 5.1).
-# Ordem: fim de linha, Rust (fmt, clippy, testes), Flutter (analise, testes).
+# Ordem: fim de linha, Rust (fmt, clippy, testes), Flutter (analise, testes), Kotlin do
+# Android (compila debug, profile e release; aviso do nosso codigo vale como erro).
 # Para no primeiro passo que falhar.
 #
 # Uso (uma linha):
@@ -123,6 +124,36 @@ try {
         if ($t -notmatch 'All tests passed') { throw "flutter test sem 'All tests passed'" }
         $m = [regex]::Matches($t, '\+(\d+): All tests passed')
         if ($m.Count -gt 0) { "$($m[$m.Count - 1].Groups[1].Value) testes" }
+    }
+
+    # ---------- Kotlin do Android (sem celular) ----------
+    # Antes, o Kotlin so compilava com -Aparelho. O debug leva a sonda BLE (src/debug);
+    # profile e release levam o CanaisDeTeste vazio. Medido em 08/11/2026 na maquina do
+    # Claude (2 nucleos): 15 a 25 s com o Gradle ja baixado; a primeira vez baixa as
+    # dependencias do profile e do release e demora minutos.
+    Passo 'kotlin do Android (debug, profile, release)' {
+        $android = Join-Path $app 'android'
+        $nomeGradlew = if ($env:OS -eq 'Windows_NT') { 'gradlew.bat' } else { 'gradlew' }
+        $gradlew = Join-Path $android $nomeGradlew
+        if (-not (Test-Path -LiteralPath $gradlew) -or -not (Test-Path -LiteralPath (Join-Path $android 'local.properties'))) {
+            # gradlew e local.properties ficam fora do git; o Flutter gera os dois.
+            Rodar $flutter @('build', 'apk', '--config-only') | Out-Null
+            if (-not (Test-Path -LiteralPath $gradlew)) { throw "o flutter build apk --config-only nao gerou $gradlew" }
+        }
+        $javaAntes = $env:JAVA_HOME
+        if ($Amb.PSObject.Properties.Name -contains 'jdk' -and $Amb.jdk) { $env:JAVA_HOME = $Amb.jdk }
+        Set-Location -LiteralPath $android
+        try {
+            $t = Rodar $gradlew @('--console=plain', ':app:compileDebugKotlin', ':app:compileProfileKotlin', ':app:compileReleaseKotlin')
+        } finally {
+            $env:JAVA_HOME = $javaAntes
+            Set-Location -LiteralPath $app
+        }
+        if ($t -notmatch 'BUILD SUCCESSFUL') { throw 'o Gradle terminou sem BUILD SUCCESSFUL' }
+        # Aviso do Kotlin no nosso codigo (src/main, src/debug, src/profile, src/release) vale como erro.
+        $avisos = @($t -split "`n" | Where-Object { $_ -match '^w: .*[/\\]android[/\\]app[/\\]src[/\\]' })
+        if ($avisos.Count -gt 0) { throw "aviso do Kotlin no nosso codigo:`n$($avisos -join "`n")" }
+        'sem aviso no nosso codigo'
     }
 
     if ($Aparelho) {

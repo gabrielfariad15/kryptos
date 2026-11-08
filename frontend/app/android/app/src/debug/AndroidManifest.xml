@@ -1,7 +1,21 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- The INTERNET permission is required for development. Specifically,
          the Flutter tool needs it to communicate with the running application
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Sonda BLE do modo Direto (modo-direto.md, passo 1): so no app de debug.
+         Um aviso so ("dispositivos por perto"), pedido pela sonda em tempo de execucao.
+         neverForLocation: o Kryptos nao deriva posicao do Bluetooth, e nenhuma permissao
+         de localizacao entra. Abaixo do Android 12 o modo Direto fica desligado (decidido
+         em 08/11/2026): sem BLUETOOTH/BLUETOOTH_ADMIN antigos, que exigiriam localizacao
+         para procurar. O instalar-no-celular.ps1 -SondaBle confere no APK. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 </manifest>

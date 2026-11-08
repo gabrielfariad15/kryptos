@@ -8,6 +8,7 @@ import 'cofre_do_aparelho.dart';
 import 'correio.dart';
 import 'mensageiro_do_aparelho.dart';
 import 'relay.dart';
+import 'sonda_ble.dart';
 import 'src/rust/api/nucleo.dart';
 import 'src/rust/frb_generated.dart';
 import 'tela_inicial.dart';
@@ -24,10 +25,23 @@ const enderecoDoRelay = String.fromEnvironment('KRYPTOS_RELAY');
 /// faixa laranja em todas as telas.
 const telaLivre = bool.fromEnvironment('KRYPTOS_TELA_LIVRE');
 
+/// Só para medir o Bluetooth (modo-direto.md, passo 1): abre a sonda BLE no lugar do app.
+///   flutter build apk --debug --dart-define=KRYPTOS_SONDA_BLE=true
+/// O lado Android da sonda só existe no app de debug; em outro build o canal não responde.
+const sondaBle = bool.fromEnvironment('KRYPTOS_SONDA_BLE');
+
 Future<void> main() async {
   // Carrega a biblioteca do núcleo (Rust) e pede ao Android a pasta do cofre.
   // Se falhar, o app para com o erro: sem núcleo ou sem pasta não há o que mostrar.
   WidgetsFlutterBinding.ensureInitialized();
+  if (sondaBle) {
+    // Sem núcleo e sem cofre: a sonda não usa o protocolo do Kryptos.
+    if (telaLivre) {
+      await const MethodChannel('kryptos/tela').invokeMethod<void>('liberar');
+    }
+    runApp(const SondaBleApp());
+    return;
+  }
   await RustLib.init();
   if (telaLivre) {
     // Se o Android recusar, o app para com o erro: melhor que fingir tela livre.

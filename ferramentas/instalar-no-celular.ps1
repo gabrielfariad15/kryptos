@@ -10,6 +10,8 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay -TelaLivre
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -RelayPublico -TelaLivre
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -LerSonda
 #
 # Sem parametro: exige um unico celular no cabo. Com mais de um, use -Todos ou -Serial.
 #
@@ -31,6 +33,20 @@
 # internet nenhuma). A conferencia do /saude daqui passa pela tailnet deste PC: o caminho
 # publico e conferido no navegador do celular. Nao combina com -Relay.
 #
+# -SondaBle: a sonda medida do modo Direto (documentacao/arquitetura/modo-direto.md,
+# passo 1). Exige os dois celulares no cabo. Monta o app de debug com
+# --dart-define=KRYPTOS_SONDA_BLE=true, confere no APK as tres permissoes de Bluetooth
+# (BLUETOOTH_SCAN com neverForLocation) e nenhuma de localizacao, confere que o Bluetooth
+# de cada celular esta ligado, zera o arquivo de medidas de cada um e espera FIM. Durante
+# o teste os celulares podem sair do cabo (5 m, 10 m e mais): a sonda grava as medidas num
+# arquivo da pasta privada do app. No FIM, espera os dois de volta no cabo, traz os
+# arquivos pelo run-as (so app de debug) para Downloads, num zip de nome unico, e roda o
+# ferramentas\analisar-sonda-ble.ps1. Nao combina com -Relay nem -RelayPublico.
+#
+# -LerSonda: so a leitura do -SondaBle, sem compilar, instalar nem zerar nada. Para quando
+# o -SondaBle parou depois do teste (celular que nao voltou ao cabo, janela fechada): as
+# medidas continuam nos celulares ate o proximo -SondaBle.
+#
 # -TelaLivre: so para filmar e capturar no teste. Monta o app sem FLAG_SECURE (o Android
 # so aceita em app de debug) e com uma faixa laranja "TELA LIBERADA" em todas as telas.
 # A captura passa a ter de mostrar conteudo.
@@ -51,7 +67,9 @@ param(
     [string]$Serial,
     [switch]$Relay,
     [switch]$RelayPublico,
-    [switch]$TelaLivre
+    [switch]$TelaLivre,
+    [switch]$SondaBle,
+    [switch]$LerSonda
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,6 +93,10 @@ $comReverse = New-Object System.Collections.Generic.List[string]
 $jobCapturas = $null
 $pararCapturas = $null
 # Endereco que o relay-publico.ps1 grava enquanto esta no ar (o mesmo caminho dele).
+# Medidas da sonda BLE: arquivo na pasta privada do app (SondaBle.kt), lido pelo run-as.
+$medidasSonda = 'files/sonda-ble.txt'
+$arquivosSonda = New-Object System.Collections.Generic.List[string]
+$carimbo = Get-Date -Format 'yyyyMMdd-HHmmss'
 $arqEnderecoPublico = Join-Path (Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Kryptos') 'relay-publico') 'endereco.txt'
 $enderecoPublico = $null
 
@@ -107,10 +129,60 @@ function Achar([string]$Pasta, [string[]]$Nomes) {
     throw "nao achei $($Nomes -join ' / ') em $Pasta"
 }
 
+# Traz o arquivo de medidas da sonda de cada celular (run-as, so app de debug), grava em
+# Downloads, le de volta, zipa e roda o analisar-sonda-ble.ps1. Usada pelo -SondaBle depois
+# do FIM e pelo -LerSonda.
+function LerEAnalisarSonda {
+    Passo 'celulares de volta no cabo' {
+        $limite = (Get-Date).AddSeconds(180)
+        do {
+            $ligadosAgora = @((Rodar $adb @('devices')) -split "`n" | Select-Object -Skip 1 |
+                ForEach-Object { $p = $_.Trim() -split '\s+'; if ($p.Count -ge 2 -and $p[1] -eq 'device') { $p[0] } })
+            $faltam = @($aparelhos | Where-Object { $ligadosAgora -notcontains $_.Serial })
+            if ($faltam.Count -eq 0) { break }
+            Write-Host "   esperando no cabo: $((@($faltam | ForEach-Object { $_.Modelo })) -join ', ')"
+            Start-Sleep -Seconds 3
+        } while ((Get-Date) -lt $limite)
+        if ($faltam.Count -gt 0) { throw "em 180 s nao voltaram ao cabo: $((@($faltam | ForEach-Object { $_.Modelo })) -join ', '). As medidas continuam nos celulares: com os dois no cabo, rode o mesmo script com -Todos -LerSonda" }
+        'os dois'
+    }
+    foreach ($a in $aparelhos) {
+        $modeloArq = ($a.Modelo.ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
+        Passo "$($a.Modelo) : medidas trazidas" {
+            # exec-out: os bytes como estao, sem o terminal do adb no meio.
+            $t = Rodar $adb @('-s', $a.Serial, 'exec-out', 'run-as', $Pacote, 'cat', $medidasSonda)
+            if (-not $t) { throw "o arquivo de medidas do $($a.Modelo) esta vazio: a sonda nao chegou a medir" }
+            $destino = Join-Path $Amb.downloads "kryptos-sonda-$modeloArq-$carimbo.txt"
+            [System.IO.File]::WriteAllText($destino, $t + "`n", (New-Object System.Text.UTF8Encoding($false)))
+            $lido = [System.IO.File]::ReadAllText($destino)
+            if ($lido.TrimEnd() -ne $t.TrimEnd()) { throw "o arquivo gravado em $destino nao bate com o lido do celular" }
+            $arquivosSonda.Add($destino)
+            "$destino, $(@($t -split "`n").Count) linhas"
+        }
+    }
+    Passo 'zip das medidas' {
+        $zip = Join-Path $Amb.downloads "kryptos-sonda-$carimbo.zip"
+        Compress-Archive -Path $arquivosSonda.ToArray() -DestinationPath $zip
+        "$zip ($([math]::Round((Get-Item -LiteralPath $zip).Length / 1KB)) KB), pronto para anexar"
+    }
+    $ps = (Get-Process -Id $PID).Path
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $saidaAnalise = @(& $ps -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'analisar-sonda-ble.ps1') -Arquivos ($arquivosSonda -join ',') 2>&1)
+    } finally { $ErrorActionPreference = $antes }
+    $codigoAnalise = $LASTEXITCODE
+    $resultados.Add('..    analise da sonda (ferramentas\analisar-sonda-ble.ps1):')
+    foreach ($l in $saidaAnalise) { $resultados.Add("      $l") }
+    if ($codigoAnalise -ne 0) { throw 'a analise da sonda saiu com FALHA (ver acima)' }
+}
+
 $ok = $false
 try {
     if ($Todos -and $Serial) { throw 'use -Todos ou -Serial, nao os dois' }
     if ($Relay -and $RelayPublico) { throw 'use -Relay ou -RelayPublico, nao os dois' }
+    if (($SondaBle -or $LerSonda) -and ($Relay -or $RelayPublico)) { throw 'a sonda BLE nao usa relay: -SondaBle e -LerSonda nao combinam com -Relay nem -RelayPublico' }
+    if ($SondaBle -and $LerSonda) { throw 'use -SondaBle (teste inteiro) ou -LerSonda (so a leitura), nao os dois' }
     $flutter = Achar (Join-Path $Amb.flutter 'bin') @('flutter.bat', 'flutter')
     $adb = Achar (Join-Path $Amb.android_sdk 'platform-tools') @('adb.exe', 'adb')
     $app = Join-Path (Join-Path $Repo 'frontend') 'app'
@@ -138,9 +210,15 @@ try {
             if ($lista.Count -ne 1) { throw "ha $($lista.Count) celulares ligados ($descricao). Use -Todos ou -Serial <serial>" }
             $escolhidos = @($lista)
         }
+        if (($SondaBle -or $LerSonda) -and $escolhidos.Count -ne 2) { throw "a sonda BLE precisa de dois celulares, um de cada papel; escolhidos: $($escolhidos.Count). Ligue os dois no cabo e use -Todos" }
         $script:aparelhos = $escolhidos
         (@($escolhidos | ForEach-Object { "$($_.Modelo), Android $($_.Android)" }) -join ' | ')
     }
+
+    if ($LerSonda) {
+        LerEAnalisarSonda
+    } else {
+    # (o resto do script fica dentro deste else sem reindentar, para o diff ficar legivel)
 
     # ---------- Rust: o Cargokit compila com a stable, que tem de ser a do rust-toolchain.toml ----------
     Passo 'versao do Rust' {
@@ -210,11 +288,34 @@ try {
         if ($Relay) { $argsBuild += "--dart-define=KRYPTOS_RELAY=http://127.0.0.1:$portaRelay" }
         if ($RelayPublico) { $argsBuild += "--dart-define=KRYPTOS_RELAY=$enderecoPublico" }
         if ($TelaLivre) { $argsBuild += '--dart-define=KRYPTOS_TELA_LIVRE=true' }
+        if ($SondaBle) { $argsBuild += '--dart-define=KRYPTOS_SONDA_BLE=true' }
         Rodar $flutter $argsBuild | Out-Null
         if (-not (Test-Path -LiteralPath $apk)) { throw "o build terminou mas nao achei $apk" }
         $comRelay = if ($Relay) { 'com o relay de teste' } elseif ($RelayPublico) { "com o relay $enderecoPublico" } else { 'sem relay' }
         $comTela = if ($TelaLivre) { 'TELA LIVRE (sem FLAG_SECURE)' } else { 'tela segura' }
-        "$([math]::Round((Get-Item -LiteralPath $apk).Length / 1MB, 1)) MB, $comRelay, $comTela"
+        $comSonda = if ($SondaBle) { ', SONDA BLE no lugar do app' } else { '' }
+        "$([math]::Round((Get-Item -LiteralPath $apk).Length / 1MB, 1)) MB, $comRelay, $comTela$comSonda"
+    }
+
+    if ($SondaBle) {
+        Passo 'permissoes da sonda no APK' {
+            # O manifesto final, de dentro do APK: o que o Android vai ver.
+            $aapt = Achar (Join-Path (Join-Path $Amb.android_sdk 'build-tools') '36.0.0') @('aapt2.exe', 'aapt2')
+            $xml = Rodar $aapt @('dump', 'xmltree', '--file', 'AndroidManifest.xml', $apk)
+            $blocos = @($xml -split 'E: uses-permission' | Select-Object -Skip 1)
+            $nomes = @($blocos | ForEach-Object { if ($_ -match 'android:name\(0x[0-9a-f]+\)="([^"]+)"') { $Matches[1] } })
+            $faltando = @('BLUETOOTH_SCAN', 'BLUETOOTH_ADVERTISE', 'BLUETOOTH_CONNECT' | Where-Object { $nomes -notcontains "android.permission.$_" })
+            if ($faltando.Count -gt 0) { throw "o APK nao pede $($faltando -join ', ')" }
+            $proibidas = @('ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION', 'BLUETOOTH', 'BLUETOOTH_ADMIN' |
+                Where-Object { $nomes -contains "android.permission.$_" })
+            if ($proibidas.Count -gt 0) { throw "o APK pede $($proibidas -join ', '): o modo Direto nao usa localizacao nem as permissoes antigas" }
+            $scan = @($blocos | Where-Object { $_ -match '"android\.permission\.BLUETOOTH_SCAN"' })[0]
+            # neverForLocation = 0x00010000 em usesPermissionFlags.
+            if ($scan -notmatch 'usesPermissionFlags\(0x[0-9a-f]+\)=0x([0-9a-f]+)' -or (([Convert]::ToInt32($Matches[1], 16)) -band 0x10000) -eq 0) {
+                throw 'BLUETOOTH_SCAN sem neverForLocation no APK'
+            }
+            'BLUETOOTH_SCAN (neverForLocation), BLUETOOTH_ADVERTISE, BLUETOOTH_CONNECT; nenhuma de localizacao'
+        }
     }
 
     # ---------- em cada celular ----------
@@ -245,10 +346,18 @@ try {
             # AndroidManifest.xml do app tira os dois. Confere no app instalado.
             $pacoteInstalado = Rodar $adb @('-s', $s, 'shell', 'dumpsys', 'package', $Pacote)
             if ($pacoteInstalado -notmatch 'android\.permission\.CAMERA') { throw 'o app instalado nao pede a camera' }
-            $sobrando = @('RECORD_AUDIO', 'WRITE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE', 'FOREGROUND_SERVICE_CAMERA' |
+            # Localizacao nunca (modo-direto.md): nem no app de debug.
+            $sobrando = @('RECORD_AUDIO', 'WRITE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE', 'FOREGROUND_SERVICE_CAMERA',
+                'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION' |
                 Where-Object { $pacoteInstalado -match "android\.permission\.$_\b" })
             if ($sobrando.Count -gt 0) { throw "o app instalado pede permissao que nao usa: $($sobrando -join ', ')" }
-            'camera sim; microfone e armazenamento nao'
+            if ($SondaBle) {
+                $semBt = @('BLUETOOTH_SCAN', 'BLUETOOTH_ADVERTISE', 'BLUETOOTH_CONNECT' | Where-Object { $pacoteInstalado -notmatch "android\.permission\.$_\b" })
+                if ($semBt.Count -gt 0) { throw "o app instalado nao pede $($semBt -join ', ')" }
+                'camera e Bluetooth sim; microfone, armazenamento e localizacao nao'
+            } else {
+                'camera sim; microfone, armazenamento e localizacao nao'
+            }
         }
 
         if ($Relay) {
@@ -269,6 +378,25 @@ try {
                 if ($w -match 'disabled') { 'Wi-Fi desligado: so os dados moveis (confira que funcionam)' }
                 elseif ($w -match 'enabled') { 'Wi-Fi ligado: vai pela internet e pelo Funnel' }
                 else { "Wi-Fi: $w" }
+            }
+        }
+
+        if ($SondaBle) {
+            Passo "$modeloAtual : Bluetooth" {
+                $bt = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'bluetooth_on')).Trim()
+                if ($bt -ne '1') { throw "o Bluetooth do $modeloAtual esta desligado (bluetooth_on=$bt): ligue e rode de novo" }
+                $w = ''
+                try { $w = ((Rodar $adb @('-s', $s, 'shell', 'cmd', 'wifi', 'status')) -split "`n")[0].Trim() }
+                catch { $w = "nao lido ($($_.Exception.Message -split "`n" | Select-Object -First 1))" }
+                # O Wi-Fi divide os 2,4 GHz com o Bluetooth: so registra, para comparar rodadas.
+                $estadoWifi = if ($w -match 'disabled') { 'desligado' } elseif ($w -match 'enabled') { 'ligado' } else { $w }
+                "ligado; Wi-Fi $estadoWifi (mantenha igual em todas as rodadas)"
+            }
+            Passo "$modeloAtual : medidas da sonda zeradas" {
+                Rodar $adb @('-s', $s, 'shell', 'run-as', $Pacote, 'rm', '-f', $medidasSonda) | Out-Null
+                $existe = (Rodar $adb @('-s', $s, 'shell', 'run-as', $Pacote, 'sh', '-c', "if [ -e $medidasSonda ]; then echo SIM; else echo NAO; fi")).Trim()
+                if ($existe -ne 'NAO') { throw "o arquivo de medidas continuou no $modeloAtual ($existe)" }
+                "$medidasSonda apagado e conferido"
             }
         }
 
@@ -327,9 +455,14 @@ try {
         }
     }
 
-    if ($Relay -or $RelayPublico) {
+    if ($Relay -or $RelayPublico -or $SondaBle) {
         Write-Host ''
-        if ($Relay) {
+        if ($SondaBle) {
+            Write-Host 'Sonda BLE aberta nos dois celulares. Faca o roteiro de'
+            Write-Host 'documentacao/arquitetura/modo-direto.md, secao "Teste da sonda", com o Nao perturbe'
+            Write-Host 'ligado. Os celulares podem sair do cabo durante o teste.'
+            Write-Host 'Digite FIM aqui so no fim do roteiro, com os dois celulares de volta no cabo.'
+        } elseif ($Relay) {
             Write-Host 'Relay de teste no ar. Faca o roteiro do teste com os dois celulares'
             Write-Host '(documentacao/arquitetura/telas-de-conversa.md, secao "Teste com os dois celulares")'
             Write-Host 'e digite FIM aqui quando terminar. O relay desliga e os reverses saem.'
@@ -428,14 +561,19 @@ try {
             $resultados.Add("OK    capturas: $($pngs.Count) telas em $zipCapturas ($kb KB); roteiro em eventos.txt")
         }
         $resultados.Add('OK    teste na mao terminado (o resultado e o que voce viu nos celulares)')
+        if ($SondaBle) {
+            LerEAnalisarSonda
+        }
         # O logcat foi limpo ao abrir o app: aqui so entra a sessao do teste.
-        foreach ($a in $aparelhos) {
+        foreach ($a in @($aparelhos | Where-Object { -not $SondaBle })) {
             $log = @((Rodar $adb @('-s', $a.Serial, 'logcat', '-d', '-v', 'time', '-s', 'flutter')) -split "`n" |
                 Where-Object { $_ -match '\S' -and $_ -notmatch '^-+ beginning of' })
             $resultados.Add("..    $($a.Modelo) : $($log.Count) linhas do app no logcat (ultimas 60)")
             foreach ($l in ($log | Select-Object -Last 60)) { $resultados.Add("      $($l.Trim())") }
         }
     }
+
+    } # fim do else do -LerSonda
 
     $ok = $true
 } catch {

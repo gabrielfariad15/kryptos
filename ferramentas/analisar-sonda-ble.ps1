@@ -1,0 +1,187 @@
+# ferramentas/analisar-sonda-ble.ps1
+# Resume as medidas da sonda BLE do modo Direto (documentacao/arquitetura/modo-direto.md,
+# passo 1). Le os arquivos de medidas, um por celular, que o
+# instalar-no-celular.ps1 -SondaBle traz de cada celular depois do FIM, e imprime:
+#   - o que cada celular tem de radio (inventario);
+#   - anuncios, tempo ate achar, conexao (MTU, pedaco, PHY);
+#   - idas e voltas por distancia, PHY e prioridade: conferidas, tempo e kbit/s
+#     (mediana, minimo, maximo) e RSSI;
+#   - o lado do servidor, a calibracao, o desfecho do modo AMBOS e as falhas por codigo;
+#   - o alcance por PHY: ate onde conferiu e onde deixou de achar.
+#
+# Uso (uma linha):
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\analisar-sonda-ble.ps1 -Arquivos <a.txt>,<b.txt>
+#
+# RESULTADO: OK so com os arquivos lidos e pelo menos uma calibracao OK e nenhuma
+# calibracao FALHOU: sem o conferidor calibrado, as medidas nao valem (regra 5.3).
+# Rodadas de calibracao (calibrar=sim) ficam fora das estatisticas de ida e volta.
+# As linhas tem so codigos e numeros (regra 8.2): nada a esconder ao colar a saida.
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string[]]$Arquivos
+)
+
+$ErrorActionPreference = 'Stop'
+$ci = [Globalization.CultureInfo]::InvariantCulture
+$resultados = New-Object System.Collections.Generic.List[string]
+
+function Num([string]$t) {
+    $v = 0.0
+    if ([double]::TryParse($t, [Globalization.NumberStyles]::Float, $ci, [ref]$v)) { return $v }
+    return $null
+}
+
+function Mediana($valores) {
+    $s = @($valores | Where-Object { $null -ne $_ } | Sort-Object)
+    if ($s.Count -eq 0) { return $null }
+    $m = [int][math]::Floor($s.Count / 2)
+    if ($s.Count % 2 -eq 1) { return [double]$s[$m] }
+    return ([double]$s[$m - 1] + [double]$s[$m]) / 2
+}
+
+function F($x) {
+    if ($null -eq $x) { return '?' }
+    return [string]::Format($ci, '{0:0.#}', [double]$x)
+}
+
+function Campos([string]$t) {
+    $h = @{}
+    if (-not $t) { return $h }
+    foreach ($p in ($t -split '\s+')) {
+        $i = $p.IndexOf('=')
+        if ($i -gt 0) { $h[$p.Substring(0, $i)] = $p.Substring($i + 1) }
+    }
+    return $h
+}
+
+function Valores($lista, [string]$campo) {
+    @(foreach ($r in $lista) { if ($r.C.ContainsKey($campo)) { Num $r.C[$campo] } })
+}
+
+# Chamado de outro script com -File, a lista chega como um texto so, separado por virgula.
+$Arquivos = @($Arquivos | ForEach-Object { $_ -split ',' } | Where-Object { $_.Trim() } | ForEach-Object { $_.Trim() })
+
+$ok = $false
+try {
+    # ---------- ler ----------
+    $regs = New-Object System.Collections.Generic.List[object]
+    $malformadas = 0
+    foreach ($arq in $Arquivos) {
+        if (-not (Test-Path -LiteralPath $arq)) { throw "nao achei $arq" }
+        $linhas = @([System.IO.File]::ReadAllLines($arq))
+        $aparelho = [System.IO.Path]::GetFileNameWithoutExtension($arq)
+        $doArquivo = 0
+        foreach ($l in $linhas) {
+            if ($l -match '^\s*$') { continue }
+            if ($l -notmatch '^(\d\d:\d\d:\d\d\.\d{3}) (MEDIDA|FALHA) sonda-ble (\S+)(?: (.*))?$') { $malformadas++; continue }
+            $hora = $Matches[1]; $tipo = $Matches[2]; $evento = $Matches[3]; $c = Campos $Matches[4]
+            if ($tipo -eq 'MEDIDA' -and $evento -eq 'aparelho' -and $c.ContainsKey('modelo')) { $aparelho = $c['modelo'] }
+            $regs.Add([pscustomobject]@{ Arquivo = $arq; Aparelho = $aparelho; Hora = $hora; Tipo = $tipo; Evento = $evento; C = $c })
+            $doArquivo++
+        }
+        if ($doArquivo -eq 0) { throw "$arq nao tem nenhuma linha da sonda (o app gravou? o run-as leu?)" }
+        $resultados.Add("OK    arquivo $([System.IO.Path]::GetFileName($arq)): $doArquivo linhas ($aparelho)")
+    }
+    if ($malformadas -gt 0) { $resultados.Add("AVISO $malformadas linhas fora do formato foram ignoradas") }
+
+    $medidas = @($regs | Where-Object { $_.Tipo -eq 'MEDIDA' })
+    $falhas = @($regs | Where-Object { $_.Tipo -eq 'FALHA' })
+
+    # ---------- aparelhos ----------
+    foreach ($r in @($medidas | Where-Object { $_.Evento -eq 'aparelho' } | Sort-Object Aparelho -Unique)) {
+        $c = $r.C
+        $campos = @('android', 'le2m', 'coded', 'anuncio_estendido', 'anuncio_max_bytes', 'anuncios_multiplos', 'wifi_aware', 'wifi_direct', 'nfc', 'uwb') |
+            ForEach-Object { if ($c.ContainsKey($_)) { "$_=$($c[$_])" } }
+        $resultados.Add("OK    aparelho $($r.Aparelho): $($campos -join ' ')")
+    }
+
+    # ---------- anuncios ----------
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'anuncio' } | Group-Object { "$($_.Aparelho) $($_.C['tipo']) $($_.C['resultado']) $($_.C['tx_dbm'])" })) {
+        $r = $g.Group[0]
+        $tx = if ($r.C.ContainsKey('tx_dbm')) { ", potencia $($r.C['tx_dbm']) dBm" } else { '' }
+        $resultados.Add("OK    anuncio $($r.Aparelho) $($r.C['tipo']): $($r.C['resultado'])$tx ($($g.Count)x)")
+    }
+
+    # ---------- achou ----------
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'achou' } |
+            Group-Object { "{0,4} {1}" -f $_.C['distancia'], $_.C['phy'] } | Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] })) {
+        $r = $g.Group[0]
+        $resultados.Add("OK    achou   a $($r.C['distancia']) m, $($r.C['phy']): $($g.Count)x; ms mediana $(F (Mediana (Valores $g.Group 'ms'))); rssi mediana $(F (Mediana (Valores $g.Group 'rssi'))) dBm")
+    }
+
+    # ---------- conexao ----------
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'conexao' } |
+            Group-Object { "$($_.C['distancia']) $($_.C['phy']) $($_.C['prioridade'])" } | Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] })) {
+        $r = $g.Group[0]
+        $mtus = (@($g.Group | ForEach-Object { $_.C['mtu'] } | Sort-Object -Unique)) -join '/'
+        $pedacos = (@($g.Group | ForEach-Object { $_.C['pedaco'] } | Sort-Object -Unique)) -join '/'
+        $phys = (@($g.Group | ForEach-Object { "$($_.C['phy_tx'])-$($_.C['phy_rx'])" } | Sort-Object -Unique)) -join '/'
+        $resultados.Add("OK    conexao a $($r.C['distancia']) m, $($r.C['phy']) $($r.C['prioridade']): $($g.Count)x; ms mediana $(F (Mediana (Valores $g.Group 'ms'))); mtu $mtus; pedaco $pedacos; phy tx-rx $phys")
+    }
+
+    # ---------- idas e voltas (fora da calibracao) ----------
+    $transf = @($medidas | Where-Object { ($_.Evento -eq 'ida' -or $_.Evento -eq 'volta') -and $_.C['calibrar'] -ne 'sim' })
+    foreach ($g in @($transf | Group-Object { "$($_.Evento) $($_.C['distancia']) $($_.C['phy']) $($_.C['prioridade'])" } |
+            Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] }, { $_.Group[0].C['prioridade'] }, { $_.Group[0].Evento })) {
+        $r = $g.Group[0]
+        $conf = @($g.Group | Where-Object { $_.C['resultado'] -eq 'CONFERIU' }).Count
+        $msv = Valores $g.Group 'ms'
+        $min = ($msv | Measure-Object -Minimum).Minimum
+        $max = ($msv | Measure-Object -Maximum).Maximum
+        $rssi = if ($r.Evento -eq 'ida') { "; rssi mediana $(F (Mediana (Valores $g.Group 'rssi'))) dBm" } else { '' }
+        $marca = if ($conf -eq $g.Count) { 'OK   ' } else { 'AVISO' }
+        $resultados.Add("$marca $("{0,-5}" -f $r.Evento) a $($r.C['distancia']) m, $($r.C['phy']) $($r.C['prioridade']): $conf de $($g.Count) conferidas; ms mediana $(F (Mediana $msv)) (min $(F $min), max $(F $max)); kbit/s mediana $(F (Mediana (Valores $g.Group 'kbps')))$rssi")
+    }
+    if ($transf.Count -eq 0) { $resultados.Add('AVISO nenhuma ida ou volta fora da calibracao') }
+
+    # ---------- lado do servidor ----------
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'servidor-recebeu' -or $_.Evento -eq 'servidor-enviou' } |
+            Group-Object { "$($_.Aparelho) $($_.Evento) $($_.C['resultado'])" })) {
+        $r = $g.Group[0]
+        $resultados.Add("OK    $($r.Evento) $($r.Aparelho): $($g.Count)x $($r.C['resultado']); ms mediana $(F (Mediana (Valores $g.Group 'ms'))); mtu $((@($g.Group | ForEach-Object { $_.C['mtu'] } | Sort-Object -Unique)) -join '/')")
+    }
+
+    # ---------- AMBOS ----------
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'ambos' } | Group-Object { "$($_.Aparelho) $($_.C['desfecho'])" })) {
+        $resultados.Add("OK    ambos $($g.Group[0].Aparelho): desfecho=$($g.Group[0].C['desfecho']) $($g.Count)x")
+    }
+
+    # ---------- calibracao ----------
+    $cal = @($medidas | Where-Object { $_.Evento -eq 'calibracao' })
+    $calOk = @($cal | Where-Object { $_.C['resultado'] -eq 'OK' }).Count
+    $calRuim = @($cal | Where-Object { $_.C['resultado'] -ne 'OK' })
+    foreach ($r in $calRuim) { $resultados.Add("FALHA calibracao rodada $($r.C['rodada']) ($($r.Aparelho)): ida=$($r.C['ida']) volta=$($r.C['volta'])") }
+    if ($calOk -gt 0) { $resultados.Add("OK    calibracao: $calOk OK, $($calRuim.Count) falhou") }
+
+    # ---------- falhas ----------
+    foreach ($g in @($falhas | Group-Object Evento | Sort-Object Count -Descending)) {
+        $onde = (@($g.Group | Group-Object { if ($_.C.ContainsKey('distancia')) { "$($_.C['phy']) a $($_.C['distancia']) m" } else { $_.Aparelho } } |
+                ForEach-Object { "$($_.Name): $($_.Count)" })) -join '; '
+        $resultados.Add("AVISO falha $($g.Name): $($g.Count)x ($onde)")
+    }
+
+    # ---------- alcance por PHY ----------
+    $ponta = @($medidas | Where-Object { $_.Evento -eq 'ida' -and $_.C['resultado'] -eq 'CONFERIU' })
+    $naoAchou = @($falhas | Where-Object { $_.Evento -eq 'NAO_ACHOU_30S' })
+    foreach ($phy in @('1M', '2M', 'CODED')) {
+        $d = @($ponta | Where-Object { $_.C['phy'] -eq $phy } | ForEach-Object { [int](Num $_.C['distancia']) })
+        $n = @($naoAchou | Where-Object { $_.C['phy'] -eq $phy } | ForEach-Object { [int](Num $_.C['distancia']) })
+        if ($d.Count -eq 0 -and $n.Count -eq 0) { continue }
+        $ate = if ($d.Count) { "conferiu ate $(($d | Measure-Object -Maximum).Maximum) m" } else { 'nenhuma ida conferida' }
+        $sem = if ($n.Count) { "; nao achou a $((@($n | Sort-Object -Unique)) -join '/') m" } else { '' }
+        $resultados.Add("OK    alcance $($phy): $ate$sem")
+    }
+
+    if ($calRuim.Count -gt 0) { throw 'a calibracao falhou: o conferidor da sonda nao pegou a sabotagem, as medidas nao valem' }
+    if ($calOk -eq 0) { throw 'nenhuma calibracao OK nos arquivos: rode CALIBRAR a 1 m antes das medidas (regra 5.3)' }
+    $ok = $true
+} catch {
+    $resultados.Add("FALHA $($_.Exception.Message)")
+} finally {
+    foreach ($linha in $resultados) { Write-Host $linha }
+}
+
+if ($ok) { Write-Host 'RESULTADO: OK'; exit 0 }
+Write-Host 'RESULTADO: FALHOU'
+exit 1
