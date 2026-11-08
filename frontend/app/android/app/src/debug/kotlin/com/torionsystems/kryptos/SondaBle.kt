@@ -271,13 +271,17 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private val conjuntos = mutableListOf<AdvertisingSetCallback>()
 
     // Envio por notificação (volta): fila e espera do aviso de envio.
-    private var filaNotificacao: List<ByteArray> = emptyList()
-    private var posNotificacao = 0
+    // Fila de notificações do servidor. O primeiro da fila está no ar enquanto
+    // notificandoAgora; sai da fila no onNotificationSent. Quadro novo entra no fim: no
+    // teste de 08/11/2026 o PEDIR_VOLTA chegou antes do aviso de envio do RESULTADO, e a
+    // versão que recusava ("NOTIFICACAO_EM_ANDAMENTO") deixou a volta sem resposta.
+    private val filaNotificacao = ArrayDeque<ByteArray>()
+    private var notificandoAgora = false
     private var ocupadoNotificacao = 0
     private var voltaServidorN = 0
     private var voltaServidorComeco = 0L
     private var voltaServidorPedacos = 0
-    private val tempoVoltaServidor = Runnable { falha("TEMPO_ESGOTADO", "papel=servidor etapa=volta n=$voltaServidorN"); filaNotificacao = emptyList() }
+    private val tempoVoltaServidor = Runnable { falha("TEMPO_ESGOTADO", "papel=servidor etapa=volta n=$voltaServidorN"); esvaziarNotificacoes() }
 
     private fun iniciarServidor(modo: String) {
         if (!pronto()) return
@@ -393,7 +397,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED && device == clienteDoServidor) {
                     clienteDoServidor = null
                     remontagemServidor = null
-                    filaNotificacao = emptyList()
+                    esvaziarNotificacoes()
                     h.removeCallbacks(tempoVoltaServidor)
                     medida("servidor", "evento=desconectou status=$status")
                 }
@@ -430,10 +434,11 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 if (device != clienteDoServidor) return@post
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     falha("NOTIFICACAO", "papel=servidor status=$status n=$voltaServidorN")
-                    filaNotificacao = emptyList()
+                    esvaziarNotificacoes()
                     return@post
                 }
-                posNotificacao++
+                if (notificandoAgora && filaNotificacao.isNotEmpty()) filaNotificacao.removeFirst()
+                notificandoAgora = false
                 notificarProximo()
             }
         }
@@ -488,24 +493,27 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
 
     private fun notificar(quadros: List<ByteArray>, envioDeVolta: Boolean) {
         if (!notificacaoLigada) { falha("SEM_NOTIFICACAO", "papel=servidor"); return }
-        if (posNotificacao < filaNotificacao.size) { falha("NOTIFICACAO_EM_ANDAMENTO", "papel=servidor"); return }
-        filaNotificacao = quadros
-        posNotificacao = 0
         if (envioDeVolta) ocupadoNotificacao = 0
-        notificarProximo()
+        filaNotificacao.addAll(quadros)
+        if (!notificandoAgora) notificarProximo()
+    }
+
+    private fun esvaziarNotificacoes() {
+        filaNotificacao.clear()
+        notificandoAgora = false
     }
 
     private fun notificarProximo() {
         val g = servidor ?: return
         val d = clienteDoServidor ?: return
         val c = saidaServidor ?: return
-        if (posNotificacao >= filaNotificacao.size) return
-        val r = g.notifyCharacteristicChanged(d, c, false, filaNotificacao[posNotificacao])
-        if (r == BluetoothStatusCodes.SUCCESS) return // espera o onNotificationSent
+        if (notificandoAgora || filaNotificacao.isEmpty()) return
+        val r = g.notifyCharacteristicChanged(d, c, false, filaNotificacao.first())
+        if (r == BluetoothStatusCodes.SUCCESS) { notificandoAgora = true; return } // espera o onNotificationSent
         ocupadoNotificacao++
         if (ocupadoNotificacao > TENTATIVAS_OCUPADO_MAX) {
             falha("NOTIFICACAO_RECUSADA", "papel=servidor codigo=$r")
-            filaNotificacao = emptyList()
+            esvaziarNotificacoes()
             return
         }
         h.postDelayed({ notificarProximo() }, 2)
@@ -542,7 +550,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         }
         clienteDoServidor = null
         remontagemServidor = null
-        filaNotificacao = emptyList()
+        esvaziarNotificacoes()
         servidorPronto = false
     }
 

@@ -171,6 +171,36 @@ Se o script parar antes de trazer as medidas: com os dois no cabo, rode a mesma 
 
 Duração: estimo de 25 a 40 min.
 
+## Resultado de 08/11/2026, a 1 m
+
+Edge anunciando, g15 procurando, os dois no Wi-Fi de casa, a 1 m. Arquivos `kryptos-sonda-*-20261108-142106.txt`.
+
+- **Inventário:** os dois têm 2M, Coded e anúncio estendido; nenhum tem Wi-Fi Aware nem UWB. O anúncio cabe em até 304 bytes no Edge e 192 no g15. O Edge informou potência de −3 dBm com "potência alta".
+- **Calibração:** OK na rodada 3: byte trocado, pedaço a menos e normal pegos nos dois sentidos.
+- **Conexão:** MTU 517 aceito, pedaço de 509 bytes, 131 pedaços por carta. A fila de escrita nunca ficou ocupada (`ocupado=0` em todas).
+- **Integridade:** fora da calibração, 16 idas e 15 voltas, todas conferidas. Nenhum pedaço perdido.
+- **Achar:** de 107 a 393 ms. **Conectar:** de 221 ms (prioridade alta) a 1.073 ms (padrão).
+- **RSSI a 1 m:** de −40 a −56 dBm.
+
+Carta de 66.594 bytes, mediana de 5 (ms e kbit/s):
+
+| Combinação | Ida (cliente escreve sem resposta) | Volta (servidor notifica) |
+|---|---|---|
+| 1M, prioridade padrão | 2.427 ms, 220 kbit/s | 20.028 ms, 26,6 kbit/s |
+| 1M, prioridade alta | 1.018 ms, 523 kbit/s | 6.335 ms, 84,1 kbit/s |
+| 2M, prioridade alta | 583 ms, 914 kbit/s | 6.156 ms, 86,5 kbit/s |
+
+O que isso diz:
+
+- **A ida bate com a referência e até passa dela:** 914 kbit/s em 2M, contra 610 kbit/s da Silicon Labs. A prioridade alta mais que dobra a velocidade; o 2M quase dobra de novo.
+- **A volta é de 6 a 10 vezes mais lenta, e o 2M não ajudou** (6,3 s contra 6,2 s). Então o gargalo não é o rádio: é o servidor esperar o `onNotificationSent` de cada notificação. Dá uma notificação a cada 47 ms com prioridade alta (6,2 s / 132 quadros) e a cada 152 ms com a padrão.
+- **Para mensagem comum, isso quase não pesa:** a carta de texto tem de 97 a 396 bytes (`transportes.md`) e cabe num pedaço só, então estimo dezenas de ms nos dois sentidos. Pesa na carta grande (66 KB) e no que vier depois (anexo, chaves em lote).
+- **Coded:** o g15 achou o anúncio de longo alcance (393 ms, −44 dBm), mas a conexão caiu em 0,5 s com status 133 (`GATT_ERROR`, genérico). Foi uma tentativa só, e não dá para concluir com isso.
+- **Defeito da sonda (corrigido no mesmo dia):** na rodada 2, o PEDIR_VOLTA chegou ao servidor antes do aviso de envio do RESULTADO. O servidor recusou (`NOTIFICACAO_EM_ANDAMENTO`), e a volta esgotou o tempo. Agora as notificações entram numa fila. A corrida depende do tempo de cada celular e não se reproduz aqui; quem prova é a próxima rodada nos celulares.
+- **Ciclo de vida:** o Edge saiu da frente às 14:34:49, e a sonda parou tudo, como desenhado.
+
+Faltam: 5, 10, 15, 20 e 30 m; mais tentativas de Coded; papéis trocados; os dois papéis ao mesmo tempo.
+
 ## O que não resolve
 
 - **Presença:** quem procura BLE por perto vê que há um Kryptos ali (o identificador de serviço é fixo). Não vê quem é.
