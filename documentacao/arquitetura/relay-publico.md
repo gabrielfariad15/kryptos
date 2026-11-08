@@ -71,7 +71,12 @@ Não desligar o Wi-Fi para "forçar o 4G" sem antes abrir um site com os dados m
 
 - Relay em `https://relay.tail9633d5.ts.net`, Tailscale 1.104.5 no Windows 11.
 - Navegador do celular no Wi-Fi de casa: `ok 0.1.0`.
-- Os dois celulares (motorola edge 40 neo e moto g15, Android 15) no Wi-Fi de casa: Central com "RELAY LIGADO", mensagem do edge para o g15 e resposta do g15 para o edge, cifradas, abertas segurando. Visto nos celulares; a sessão não teve logcat nem capturas guardadas.
+- Os dois celulares (motorola edge 40 neo e moto g15, Android 15) no Wi-Fi de casa: Central com "RELAY LIGADO", mensagem e resposta cifradas, abertas segurando. Visto nos celulares e no `eventos.txt` das capturas automáticas (224 telas em 17,7 min):
+  - 09:57 a 10:06, Wi-Fi desligado e dados móveis sem funcionar: `publicar`, `buscar` e `enviar falhou (REDE_SocketException)` nos dois, a cada tentativa;
+  - 10:08, Wi-Fi ligado: `enviar falhou (SEM_CHAVE)` duas vezes no edge. O relay era novo e o estoque de chaves avulsas fica só na memória: até o g15 buscar com sucesso e repor as chaves dele, não havia chave para abrir conversa nova;
+  - 10:09: `carta enviada (conversa nova)` no g15, `carta selada (conversa nova)` no edge, `carta enviada (conversa aberta)` no edge, `carta selada (conversa aberta)` no g15.
+- O logcat lido no FIM veio com 0 linhas do app nos dois celulares. Palpite: em 17,7 min o buffer do logcat girou com as linhas de outros apps. As linhas ficaram no `eventos.txt`, que as lê durante o teste.
+- Segunda versão da conferência por fora, no PC: `HTTP 200 via 209.177.145.137` (servidor do Funnel), onde a primeira dava o IP da tailnet.
 - Não testado: 4G (os dados móveis do celular testado não funcionaram), celulares longe de casa.
 
 ## O que esta etapa não resolve
