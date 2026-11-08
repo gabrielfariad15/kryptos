@@ -14,7 +14,8 @@ Decisões de 07/11/2026:
 - **Segurar para ler:**
   - a primeira vez decifra e começa o minuto até a queima;
   - o texto só aparece enquanto o dedo está na mensagem;
-  - fechada, a mensagem mostra sempre 8 grupos de letras, para o tamanho não aparecer.
+  - fechada, a mensagem mostra sempre 8 grupos de letras, para o tamanho não aparecer. As letras são enfeite, sorteadas com o gerador seguro uma vez por mensagem a cada abertura da conversa: não vêm do texto nem da posição da mensagem, então duas mensagens, ou a mesma em dois aparelhos, não mostram as mesmas letras (antes repetiam, achado no teste de 07/11/2026).
+  - a hora "RX" é a de chegada gravada no índice da caixa (caixa-selada.md), a mesma depois de reabrir o app.
 - **Enviadas:** só na memória, fechadas como as recebidas. Queimam 60 s depois de enviadas e somem quando o app sai da frente.
 - **Avisos:** a Central mostra "N mensagens não puderam ser abertas", a caixa cheia e a falha do relay ou da caixa, sempre com o código.
 - **Modos:** Grupo e Direto aparecem apagados, com "PRÓXIMA FASE".

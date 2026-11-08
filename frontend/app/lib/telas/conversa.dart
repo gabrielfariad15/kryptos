@@ -63,6 +63,22 @@ class _Linha {
 
 class _ConversaState extends State<Conversa> {
   final _campo = TextEditingController();
+
+  /// Letras de enfeite de cada mensagem fechada, sorteadas uma vez por mensagem com o
+  /// gerador seguro. Não saem do texto nem da posição da mensagem: duas mensagens, ou
+  /// a mesma em dois aparelhos, não mostram as mesmas letras.
+  final _enfeites = <String, String>{};
+  final _sorteio = Random.secure();
+
+  String _enfeite(String id) => _enfeites.putIfAbsent(
+    id,
+    () => [
+      for (var g = 0; g < gruposFechados; g++)
+        String.fromCharCodes([
+          for (var l = 0; l < 5; l++) 0x41 + _sorteio.nextInt(26),
+        ]),
+    ].join(' '),
+  );
   String? _segurando;
   String? _texto;
   Uint8List? _bytes;
@@ -213,6 +229,7 @@ class _ConversaState extends State<Conversa> {
                                   texto: _segurando == linhas[i].id
                                       ? _texto
                                       : null,
+                                  enfeite: _enfeite(linhas[i].id),
                                   aoSegurar: () => _segurar(linhas[i]),
                                   aoSoltar: _soltar,
                                 ),
@@ -338,6 +355,7 @@ class _Mensagem extends StatelessWidget {
     required this.linha,
     required this.plantao,
     required this.texto,
+    required this.enfeite,
     required this.aoSegurar,
     required this.aoSoltar,
   });
@@ -346,6 +364,7 @@ class _Mensagem extends StatelessWidget {
   final _Linha linha;
   final Plantao plantao;
   final String? texto;
+  final String enfeite;
   final VoidCallback aoSegurar;
   final VoidCallback aoSoltar;
 
@@ -353,17 +372,6 @@ class _Mensagem extends StatelessWidget {
 
   static String _relogio(int segundos) =>
       '${_duasCasas(segundos ~/ 60)}:${_duasCasas(segundos % 60)}';
-
-  /// Letras de enfeite, as mesmas a cada desenho da mesma mensagem. Não vêm do texto.
-  static String _grupos(String id) {
-    final sorteio = Random(id.hashCode);
-    return [
-      for (var g = 0; g < gruposFechados; g++)
-        String.fromCharCodes([
-          for (var l = 0; l < 5; l++) 0x41 + sorteio.nextInt(26),
-        ]),
-    ].join(' ');
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -450,7 +458,8 @@ class _Mensagem extends StatelessWidget {
                           ),
                         )
                       : Text(
-                          _grupos(linha.id),
+                          enfeite,
+                          key: Key('enfeite-${linha.id}'),
                           style: const TextStyle(
                             fontSize: 14,
                             height: 1.8,

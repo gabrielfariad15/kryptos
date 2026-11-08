@@ -42,7 +42,14 @@ class MensageiroDoAparelho implements Mensageiro {
   @override
   Future<List<Selada>> listar() async => [
     for (final m in await caixa.listar())
-      Selada(gaveta: m.gaveta, lida: m.lida, remetente: m.remetente),
+      Selada(
+        gaveta: m.gaveta,
+        lida: m.lida,
+        remetente: m.remetente,
+        chegada: m.chegada > 0
+            ? DateTime.fromMillisecondsSinceEpoch(m.chegada * 1000)
+            : null,
+      ),
   ];
 
   @override

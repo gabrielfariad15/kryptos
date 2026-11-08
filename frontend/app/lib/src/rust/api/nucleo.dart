@@ -347,14 +347,20 @@ class MensagemNaCaixa {
   /// Código de quem mandou, ou vazio se não se sabe (caixa antiga, sem remetente).
   final String remetente;
 
+  /// Segundos desde 1970 (UTC) do minuto em que a carta chegou ao aparelho, ou 0 se
+  /// não se sabe (caixa antiga).
+  final PlatformInt64 chegada;
+
   const MensagemNaCaixa({
     required this.gaveta,
     required this.lida,
     required this.remetente,
+    required this.chegada,
   });
 
   @override
-  int get hashCode => gaveta.hashCode ^ lida.hashCode ^ remetente.hashCode;
+  int get hashCode =>
+      gaveta.hashCode ^ lida.hashCode ^ remetente.hashCode ^ chegada.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -363,7 +369,8 @@ class MensagemNaCaixa {
           runtimeType == other.runtimeType &&
           gaveta == other.gaveta &&
           lida == other.lida &&
-          remetente == other.remetente;
+          remetente == other.remetente &&
+          chegada == other.chegada;
 }
 
 /// Sal novo e PIN esticado (Argon2id), para o HMAC do Keystore.

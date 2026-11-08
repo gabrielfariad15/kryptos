@@ -21,22 +21,25 @@
 //!
 //! Sem cabeçalho fixo: a gaveta vazia (bytes aleatórios) não se distingue da ocupada.
 //!
-//! Índice (`caixa.kryptos`, 7.357 bytes, sempre), cifrado com a chave do cofre:
+//! Índice (`caixa.kryptos`, 7.757 bytes, sempre), cifrado com a chave do cofre:
 //!
 //! ```text
-//! arquivo = "KRYCAIXA" || versão (2) || nonce (24) || XChaCha20-Poly1305(..., aad = cabeçalho)
+//! arquivo = "KRYCAIXA" || versão (3) || nonce (24) || XChaCha20-Poly1305(..., aad = cabeçalho)
 //! chave   = HKDF-SHA256(sal vazio, ikm = chave do cofre, info = "KRYPTOS/caixa/v1")
 //! claro   = próximo número (u64 LE)
-//!           || 100 × (estado (1) || número (u64 LE) || resumo (32) || remetente (32))
+//!           || 100 × (estado (1) || número (u64 LE) || resumo (32) || remetente (32)
+//!                     || chegada (u32 LE))
 //! ```
 //!
-//! O número ordena a chegada (não é data). O resumo é o SHA-256 da carta, para
-//! reconhecer a mesma carta entregue de novo pelo relay. O remetente é a Ed25519 de
-//! quem mandou (decisão de 07/11/2026: a Central mostra de quem são as não lidas sem
-//! abrir a gaveta); zeros quando não se sabe.
+//! O número ordena a chegada. O resumo é o SHA-256 da carta, para reconhecer a mesma
+//! carta entregue de novo pelo relay. O remetente é a Ed25519 de quem mandou (decisão
+//! de 07/11/2026: a Central mostra de quem são as não lidas sem abrir a gaveta); zeros
+//! quando não se sabe. A chegada é o minuto em que a carta chegou ao aparelho, contado
+//! desde 1970 (UTC), para a tela mostrar a hora certa depois de reabrir o app
+//! (decisão de 07/11/2026); zero quando não se sabe.
 //!
-//! A versão 1 (4.157 bytes, sem remetente) ainda é lida, com o remetente desconhecido;
-//! a gravação é sempre na versão 2.
+//! As versões 1 (4.157 bytes, sem remetente nem chegada) e 2 (7.357 bytes, sem
+//! chegada) ainda são lidas, com o que falta desconhecido; a gravação é sempre na 3.
 
 use std::fs;
 use std::io;
@@ -75,16 +78,22 @@ pub const TAMANHO_PEDIDO: usize = DOMINIO_GAVETA.len() + 1 + TAMANHO_NONCE;
 pub const TAMANHO_HMAC: usize = 32;
 
 const MAGICO_INDICE: &[u8; 8] = b"KRYCAIXA";
-const VERSAO_INDICE: u8 = 2;
+const VERSAO_INDICE: u8 = 3;
+const VERSAO_INDICE_V2: u8 = 2;
 const VERSAO_INDICE_V1: u8 = 1;
 const INFO_INDICE: &[u8] = b"KRYPTOS/caixa/v1";
 const TAMANHO_CABECALHO_INDICE: usize = MAGICO_INDICE.len() + 1 + TAMANHO_NONCE;
 const BYTES_LUGAR_V1: usize = 1 + 8 + 32;
-const BYTES_LUGAR: usize = BYTES_LUGAR_V1 + 32;
+const BYTES_LUGAR_V2: usize = BYTES_LUGAR_V1 + 32;
+const BYTES_LUGAR: usize = BYTES_LUGAR_V2 + 4;
 const BYTES_CLARO_INDICE_V1: usize = 8 + CAPACIDADE * BYTES_LUGAR_V1;
+const BYTES_CLARO_INDICE_V2: usize = 8 + CAPACIDADE * BYTES_LUGAR_V2;
 const BYTES_CLARO_INDICE: usize = 8 + CAPACIDADE * BYTES_LUGAR;
-/// Tamanho do índice: 7.357 bytes (conferido no teste).
+/// Tamanho do índice: 7.757 bytes (conferido no teste).
 pub const TAMANHO_INDICE: usize = TAMANHO_CABECALHO_INDICE + BYTES_CLARO_INDICE + TAMANHO_ETIQUETA;
+/// Tamanho do índice da versão 2, que ainda é lido: 7.357 bytes.
+const TAMANHO_INDICE_V2: usize =
+    TAMANHO_CABECALHO_INDICE + BYTES_CLARO_INDICE_V2 + TAMANHO_ETIQUETA;
 /// Tamanho do índice da versão 1, que ainda é lido: 4.157 bytes.
 const TAMANHO_INDICE_V1: usize =
     TAMANHO_CABECALHO_INDICE + BYTES_CLARO_INDICE_V1 + TAMANHO_ETIQUETA;
@@ -146,6 +155,9 @@ pub struct Lugar {
     pub resumo: [u8; 32],
     /// Ed25519 de quem mandou. `None` sem carta ou vindo de um índice da versão 1.
     pub remetente: Option<[u8; 32]>,
+    /// Minuto da chegada ao aparelho, desde 1970 (UTC). `None` sem carta ou vindo de
+    /// um índice das versões 1 e 2.
+    pub chegada: Option<u32>,
 }
 
 impl Lugar {
@@ -154,6 +166,7 @@ impl Lugar {
         numero: 0,
         resumo: [0; 32],
         remetente: None,
+        chegada: None,
     };
 }
 
@@ -179,16 +192,19 @@ impl Indice {
             c.extend_from_slice(&l.numero.to_le_bytes());
             c.extend_from_slice(&l.resumo);
             c.extend_from_slice(&l.remetente.unwrap_or([0; 32]));
+            c.extend_from_slice(&l.chegada.unwrap_or(0).to_le_bytes());
         }
         c
     }
 
-    /// Leitura estrita: estado conhecido; gaveta sem carta com número, resumo e
-    /// remetente em zero; gaveta com carta com número entre 1 e `proximo - 1`, sem
-    /// repetir. Remetente em zero numa gaveta com carta é "não se sabe".
+    /// Leitura estrita: estado conhecido; gaveta sem carta com número, resumo,
+    /// remetente e chegada em zero; gaveta com carta com número entre 1 e
+    /// `proximo - 1`, sem repetir. Remetente ou chegada em zero numa gaveta com carta
+    /// é "não se sabe".
     fn de_claro(c: &[u8], versao: u8) -> Resultado<Self> {
         let (tamanho, por_lugar) = match versao {
             VERSAO_INDICE => (BYTES_CLARO_INDICE, BYTES_LUGAR),
+            VERSAO_INDICE_V2 => (BYTES_CLARO_INDICE_V2, BYTES_LUGAR_V2),
             VERSAO_INDICE_V1 => (BYTES_CLARO_INDICE_V1, BYTES_LUGAR_V1),
             _ => return Err(ErroCofre::CaixaVersaoDesconhecida),
         };
@@ -215,15 +231,20 @@ impl Indice {
             let mut resumo = [0u8; 32];
             resumo.copy_from_slice(&b[9..41]);
             let mut remetente = [0u8; 32];
-            if por_lugar == BYTES_LUGAR {
-                remetente.copy_from_slice(&b[41..]);
+            if por_lugar >= BYTES_LUGAR_V2 {
+                remetente.copy_from_slice(&b[41..73]);
             }
+            let mut chegada = [0u8; 4];
+            if por_lugar == BYTES_LUGAR {
+                chegada.copy_from_slice(&b[73..77]);
+            }
+            let chegada = u32::from_le_bytes(chegada);
             if estado.tem_carta() {
                 if numero == 0 || numero >= proximo || numeros.contains(&numero) {
                     return Err(ErroCofre::CaixaCorrompida);
                 }
                 numeros.push(numero);
-            } else if numero != 0 || resumo != [0; 32] || remetente != [0; 32] {
+            } else if numero != 0 || resumo != [0; 32] || remetente != [0; 32] || chegada != 0 {
                 return Err(ErroCofre::CaixaCorrompida);
             }
             indice.lugares[i] = Lugar {
@@ -231,6 +252,7 @@ impl Indice {
                 numero,
                 resumo,
                 remetente: (remetente != [0; 32]).then_some(remetente),
+                chegada: (chegada != 0).then_some(chegada),
             };
         }
         Ok(indice)
@@ -276,6 +298,7 @@ pub fn abrir_indice(arquivo: &[u8], chave_do_cofre: &[u8; TAMANHO_CHAVE]) -> Res
     let versao = arquivo[MAGICO_INDICE.len()];
     let tamanho = match versao {
         VERSAO_INDICE => TAMANHO_INDICE,
+        VERSAO_INDICE_V2 => TAMANHO_INDICE_V2,
         VERSAO_INDICE_V1 => TAMANHO_INDICE_V1,
         _ => return Err(ErroCofre::CaixaVersaoDesconhecida),
     };
@@ -474,8 +497,10 @@ mod testes {
                 estado,
                 numero: i.proximo,
                 resumo: [marca + 1; 32],
-                // A reservada fica sem remetente: "não se sabe" também tem de valer.
+                // A reservada fica sem remetente nem chegada: "não se sabe" também
+                // tem de valer.
                 remetente: (g != 99).then_some([marca + 0x40; 32]),
+                chegada: (g != 99).then_some(29_000_000 + u32::from(marca)),
             };
             i.proximo += 1;
         }
@@ -486,11 +511,12 @@ mod testes {
     #[test]
     fn tamanhos_fixos() -> Resultado<()> {
         assert_eq!(TAMANHO_GAVETA, 65_644);
-        assert_eq!(TAMANHO_INDICE, 7_357);
+        assert_eq!(TAMANHO_INDICE, 7_757);
+        assert_eq!(TAMANHO_INDICE_V2, 7_357);
         assert_eq!(TAMANHO_INDICE_V1, 4_157);
         assert_eq!(TAMANHO_PEDIDO, 42);
-        assert_eq!(selar_indice(&Indice::vazio(), &CHAVE)?.len(), 7_357);
-        assert_eq!(selar_indice(&indice_com_tres(), &CHAVE)?.len(), 7_357);
+        assert_eq!(selar_indice(&Indice::vazio(), &CHAVE)?.len(), 7_757);
+        assert_eq!(selar_indice(&indice_com_tres(), &CHAVE)?.len(), 7_757);
         let eu = Identidade::nova().chaves_publicas();
         assert_eq!(selar_gaveta(0, NONCE, &HMAC, &eu, b"")?.len(), 65_644);
         assert_eq!(
@@ -529,12 +555,13 @@ mod testes {
     #[test]
     fn indice_fora_das_regras_e_recusado() -> Resultado<()> {
         type Mexer = fn(&mut Vec<u8>);
-        let casos: [(&str, Mexer); 8] = [
+        let casos: [(&str, Mexer); 9] = [
             ("próximo zero", |c| c[..8].fill(0)),
             ("estado desconhecido", |c| c[8] = 9),
             ("livre com número", |c| c[8 + BYTES_LUGAR + 1] = 1),
             ("livre com resumo", |c| c[8 + BYTES_LUGAR + 20] = 1),
             ("livre com remetente", |c| c[8 + BYTES_LUGAR + 50] = 1),
+            ("livre com chegada", |c| c[8 + BYTES_LUGAR + 75] = 1),
             ("com carta e número zero", |c| c[8 + 1..8 + 9].fill(0)),
             ("número no futuro", |c| c[8 + 1] = 200),
             ("número repetido", |c| {
@@ -679,6 +706,55 @@ mod testes {
         Ok([cabecalho.as_slice(), claro.as_slice()].concat())
     }
 
+    /// O índice da versão 2, como as caixas criadas antes da hora de chegada.
+    fn selar_indice_v2(indice: &Indice) -> Resultado<Vec<u8>> {
+        let mut claro = Vec::with_capacity(BYTES_CLARO_INDICE_V2);
+        claro.extend_from_slice(&indice.proximo.to_le_bytes());
+        for l in &indice.lugares {
+            claro.push(l.estado.numero());
+            claro.extend_from_slice(&l.numero.to_le_bytes());
+            claro.extend_from_slice(&l.resumo);
+            claro.extend_from_slice(&l.remetente.unwrap_or([0; 32]));
+        }
+        let mut cabecalho = [0u8; TAMANHO_CABECALHO_INDICE];
+        cabecalho[..MAGICO_INDICE.len()].copy_from_slice(MAGICO_INDICE);
+        cabecalho[MAGICO_INDICE.len()] = VERSAO_INDICE_V2;
+        cabecalho[MAGICO_INDICE.len() + 1..].copy_from_slice(&NONCE);
+        cifra_do_indice(&CHAVE)?
+            .encrypt_in_place(&XNonce::from(NONCE), &cabecalho, &mut claro)
+            .map_err(|_| ErroCofre::CaixaCorrompida)?;
+        Ok([cabecalho.as_slice(), claro.as_slice()].concat())
+    }
+
+    #[test]
+    fn indice_da_versao_2_abre_sem_chegada() -> Resultado<()> {
+        use sha2::Digest;
+        let v2 = selar_indice_v2(&indice_com_tres())?;
+        let resumo: String = Sha256::digest(&v2)
+            .iter()
+            .map(|x| format!("{x:02x}"))
+            .collect();
+        assert_eq!(resumo, VETOR_INDICE_V2);
+        let aberto = abrir_indice(&v2, &CHAVE)?;
+        let mut esperado = indice_com_tres();
+        for l in &mut esperado.lugares {
+            l.chegada = None;
+        }
+        assert_eq!(aberto, esperado);
+        // regravado, vira versão 3
+        let v3 = selar_indice(&aberto, &CHAVE)?;
+        assert_eq!(v3[MAGICO_INDICE.len()], VERSAO_INDICE);
+        assert_eq!(abrir_indice(&v3, &CHAVE)?, esperado);
+        // versão 2 com o tamanho da 3: recusada
+        let mut trocado = v3.clone();
+        trocado[MAGICO_INDICE.len()] = VERSAO_INDICE_V2;
+        assert_eq!(
+            abrir_indice(&trocado, &CHAVE),
+            Err(ErroCofre::CaixaCorrompida)
+        );
+        Ok(())
+    }
+
     #[test]
     fn indice_da_versao_1_abre_sem_remetente() -> Resultado<()> {
         use sha2::Digest;
@@ -692,14 +768,15 @@ mod testes {
         let mut esperado = indice_com_tres();
         for l in &mut esperado.lugares {
             l.remetente = None;
+            l.chegada = None;
         }
         assert_eq!(aberto, esperado);
-        // regravado, vira versão 2
-        let v2 = selar_indice(&aberto, &CHAVE)?;
-        assert_eq!(v2[MAGICO_INDICE.len()], VERSAO_INDICE);
-        assert_eq!(abrir_indice(&v2, &CHAVE)?, esperado);
-        // versão 1 com o tamanho da 2 (e vice-versa): recusada
-        let mut trocado = v2.clone();
+        // regravado, vira a versão atual
+        let v3 = selar_indice(&aberto, &CHAVE)?;
+        assert_eq!(v3[MAGICO_INDICE.len()], VERSAO_INDICE);
+        assert_eq!(abrir_indice(&v3, &CHAVE)?, esperado);
+        // versão 1 com o tamanho da atual: recusada
+        let mut trocado = v3.clone();
         trocado[MAGICO_INDICE.len()] = VERSAO_INDICE_V1;
         assert_eq!(
             abrir_indice(&trocado, &CHAVE),
@@ -709,7 +786,10 @@ mod testes {
     }
 
     const VETOR_GAVETA: &str = "0aa74af231362518b38e1a503245b8c7199f9c65161267f8adee0546f2baa33e";
-    const VETOR_INDICE: &str = "c556a24c4f402677ddf9d6f9a1b020df8c044bb580f32154e459c8f90e425af3";
+    const VETOR_INDICE: &str = "c28044a0715867eaaebe6a1ff1408ed8af052e25b1a2f42285e8fcdaa1c734b0";
+    /// O vetor da versão 2, de antes da hora de chegada (mesmo oráculo).
+    const VETOR_INDICE_V2: &str =
+        "c556a24c4f402677ddf9d6f9a1b020df8c044bb580f32154e459c8f90e425af3";
     /// O vetor da versão 1, de antes do remetente (mesmo oráculo).
     const VETOR_INDICE_V1: &str =
         "9b3403a80ecb722593ac2585c1687edb0d613eb82bd6833a906ef18991721634";

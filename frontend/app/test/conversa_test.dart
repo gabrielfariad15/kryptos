@@ -479,6 +479,54 @@ void main() {
     );
   });
 
+  testWidgets(
+    'mensagem de antes de reabrir mostra a hora gravada de chegada, não a de agora',
+    (tester) async {
+      final relogio = RelogioFalso(); // 20:14
+      final m = MensageiroFalso()
+        ..guardar(amigo, 'antiga', chegada: DateTime(2026, 11, 7, 20, 9))
+        ..guardar(amigo, 'caixa antiga, sem hora');
+      await abrirCentral(
+        tester,
+        mensageiro: m,
+        relogio: relogio,
+        agenda: agendaCom([amigo]),
+      );
+      await abrirConversa(tester, amigo);
+      expect(find.text('MSG 01 · RX 20:09'), findsOneWidget);
+      expect(find.text('MSG 02 · RX 20:14'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'letras de enfeite sorteadas por mensagem: não repetem entre mensagens nem entre aberturas',
+    (tester) async {
+      final m = MensageiroFalso()
+        ..guardar(amigo, 'um')
+        ..guardar(amigo, 'dois');
+      await abrirCentral(
+        tester,
+        mensageiro: m,
+        relogio: RelogioFalso(),
+        agenda: agendaCom([amigo]),
+      );
+      await abrirConversa(tester, amigo);
+      String enfeite(String id) =>
+          tester.widget<Text>(find.byKey(Key('enfeite-$id'))).data!;
+      final primeira = enfeite('rx-0');
+      expect(primeira.split(' '), hasLength(gruposFechados));
+      expect(enfeite('rx-1'), isNot(primeira));
+      // a mesma mensagem não muda enquanto a tela está aberta
+      await tester.pump(const Duration(seconds: 1));
+      expect(enfeite('rx-0'), primeira);
+      // outra abertura da conversa (outro aparelho, na prática): letras novas
+      await tester.tap(find.byKey(const Key('voltar-central')));
+      await tester.pumpAndSettle();
+      await abrirConversa(tester, amigo);
+      expect(enfeite('rx-0'), isNot(primeira));
+    },
+  );
+
   test(
     'aviso de envio para cada falha conhecida, sem repetir o código cru',
     () {

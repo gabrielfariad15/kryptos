@@ -692,6 +692,8 @@ pub struct ItemDaCaixa {
     /// Quem mandou, pelo índice (decisão de 07/11/2026). `None`: índice antigo, sem
     /// remetente, ou contato que não está mais na agenda.
     pub remetente: Option<CodigoContato>,
+    /// Minuto da chegada ao aparelho, desde 1970 (UTC). `None`: índice antigo.
+    pub chegada: Option<u32>,
 }
 
 /// Mensagem aberta para a tela.
@@ -789,6 +791,16 @@ fn decifrar_de_alguem(
     Ok(Some((contato, texto, false)))
 }
 
+/// Minuto atual desde 1970 (UTC), para a hora de chegada no índice. `None` se o
+/// relógio do aparelho estiver antes de 1970 (a tela mostra a hora em que viu).
+fn minuto_agora() -> Option<u32> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| u32::try_from(d.as_secs() / 60).ok())
+        .filter(|m| *m != 0)
+}
+
 /// Porta única das cartas, venham do relay ou do modo Direto.
 ///
 /// Ordem: confere o destinatário, reconhece carta repetida e procura gaveta livre
@@ -842,6 +854,7 @@ pub fn receber_carta(bytes: &[u8]) -> Result<Chegada, ErroCaixa> {
             numero: novo.proximo,
             resumo,
             remetente: Some(*contato.chaves().ed25519.as_bytes()),
+            chegada: minuto_agora(),
         };
         novo.proximo += 1;
         trocar_indice(selo, caixa, novo)?;
@@ -915,6 +928,7 @@ pub fn caixa() -> Result<Vec<ItemDaCaixa>, ErroCaixa> {
                             .find(|c| c.chaves().ed25519.as_bytes() == &ed)
                             .map(|c| c.codigo())
                     }),
+                    chegada: l.chegada,
                 })
             })
             .collect();
@@ -982,6 +996,7 @@ fn queimar(selo: &Selo, caixa: &mut Caixa, gaveta: u8) -> Result<(), ErroCaixa> 
             numero: 0,
             resumo: [0; 32],
             remetente: None,
+            chegada: None,
         };
         trocar_indice(selo, caixa, novo)?;
     }
@@ -1051,6 +1066,7 @@ pub fn chave_trocada(gaveta: u8) -> Result<(), ErroCaixa> {
                     numero: 0,
                     resumo: [0; 32],
                     remetente: None,
+                    chegada: None,
                 };
                 trocar_indice(selo, caixa, novo)
             }
@@ -1858,15 +1874,21 @@ mod testes {
             let carta = carta_para_b(&sessao_a.cifrar(texto)?)?;
 
             let gaveta = chegar(&ks, &carta)?;
+            let itens_antes = caixa()?;
             assert_eq!(
-                caixa()?,
+                itens_antes,
                 vec![ItemDaCaixa {
                     gaveta,
                     numero: 1,
                     lida: false,
                     remetente: Some(a.codigo_contato()),
+                    chegada: itens_antes[0].chegada,
                 }]
             );
+            // a hora de chegada é a do relógio, ao minuto
+            let chegada = itens_antes[0].chegada.ok_or("sem hora de chegada")?;
+            let agora = minuto_agora().ok_or("relógio")?;
+            assert!(agora - chegada <= 1, "chegada {chegada}, agora {agora}");
             // selada: o texto não está no disco
             assert_eq!(achados_no_disco(pasta, texto)?, 0);
             // o relay entregou de novo: reconhecida, sem gastar gaveta
@@ -1942,9 +1964,15 @@ mod testes {
                 b"comum"
             );
 
-            // o app fecha: a conversa morre, a caixa fica
+            // o app fecha: a conversa morre, a caixa fica, com a hora de chegada
+            let horas: Vec<_> = caixa()?.iter().map(|i| i.chegada).collect();
             reabrir(pasta)?;
             assert_eq!(nao_abertas()?, 0);
+            assert_eq!(
+                caixa()?.iter().map(|i| i.chegada).collect::<Vec<_>>(),
+                horas
+            );
+            assert!(horas.iter().all(Option::is_some));
             // a lida antes de fechar queima ao abrir; a não lida continua
             assert_eq!(queimar_lidas()?, vec![g2]);
             assert_eq!(

@@ -31,6 +31,7 @@ class Selada {
     required this.gaveta,
     required this.lida,
     required this.remetente,
+    this.chegada,
   });
 
   final int gaveta;
@@ -38,6 +39,10 @@ class Selada {
 
   /// Código de quem mandou; vazio quando não se sabe (caixa antiga).
   final String remetente;
+
+  /// Minuto em que a carta chegou ao aparelho, gravado no índice da caixa. Nada
+  /// quando não se sabe (caixa antiga): a tela usa a hora em que viu a mensagem.
+  final DateTime? chegada;
 }
 
 /// Uma mensagem aberta para a tela. [texto] é zerado por quem recebe, depois do uso.

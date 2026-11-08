@@ -308,6 +308,9 @@ pub struct MensagemNaCaixa {
     pub lida: bool,
     /// Código de quem mandou, ou vazio se não se sabe (caixa antiga, sem remetente).
     pub remetente: String,
+    /// Segundos desde 1970 (UTC) do minuto em que a carta chegou ao aparelho, ou 0 se
+    /// não se sabe (caixa antiga).
+    pub chegada: i64,
 }
 
 /// Mensagens não queimadas, na ordem de chegada.
@@ -319,6 +322,7 @@ pub fn caixa_listar() -> anyhow::Result<Vec<MensagemNaCaixa>> {
             gaveta: i.gaveta,
             lida: i.lida,
             remetente: i.remetente.map(|c| c.como_texto()).unwrap_or_default(),
+            chegada: i.chegada.map_or(0, |m| i64::from(m) * 60),
         })
         .collect())
 }

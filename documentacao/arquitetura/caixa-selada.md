@@ -27,15 +27,16 @@ Mesma pasta do cofre (`noBackupFilesDir`). Todos existem desde a criação do co
 - **Dado autenticado:** `"KRYPTOS/gaveta/v1" || número da gaveta`. Uma gaveta copiada para outro lugar não abre.
 - **Gaveta vazia:** 65.644 bytes aleatórios. Não há cabeçalho fixo, então a vazia não se distingue da ocupada.
 
-**Índice:** `caixa.kryptos`, 7.357 bytes (versão 2), cifrado com uma chave tirada da chave do cofre (`info = "KRYPTOS/caixa/v1"`), como a agenda:
+**Índice:** `caixa.kryptos`, 7.757 bytes (versão 3), cifrado com uma chave tirada da chave do cofre (`info = "KRYPTOS/caixa/v1"`), como a agenda:
 
-- `"KRYCAIXA"`, versão (2), nonce (24);
-- cifrado: próximo número (u64), seguido de 100 × (estado, número, resumo, remetente);
+- `"KRYCAIXA"`, versão (3), nonce (24);
+- cifrado: próximo número (u64), seguido de 100 × (estado, número, resumo, remetente, chegada);
 - **estado:** livre, reservada, não lida, lida ou queimada;
 - **número:** ordem de chegada (não é data);
 - **resumo:** SHA-256 da carta, para reconhecer a mesma carta entregue de novo.
 - **remetente:** a Ed25519 de quem mandou, ou zeros quando não se sabe. Assim a Central mostra de quem são as não lidas sem abrir a gaveta (decisão de 07/11/2026). Quem consegue abrir o índice já precisa do PIN e do Keystore, e com eles veria a agenda inteira; o texto continua só na gaveta.
-- **versão 1:** 4.157 bytes, sem remetente, das caixas criadas antes. Ainda é lida, com o remetente desconhecido. A gravação seguinte já sai na versão 2.
+- **chegada:** o minuto em que a carta chegou ao aparelho, contado desde 1970 (UTC, u32), ou zero quando não se sabe. Assim a conversa mostra a hora certa depois de reabrir o app; antes, mostrava a hora em que a tela viu a mensagem (achado no teste de 07/11/2026, decisão do mesmo dia). Mesma proteção do remetente.
+- **versões antigas:** a 2 (7.357 bytes, sem chegada) e a 1 (4.157 bytes, sem remetente nem chegada) ainda são lidas, com o que falta desconhecido. A gravação seguinte já sai na versão 3.
 
 Leitura estrita: estado desconhecido, gaveta sem carta com número, resumo ou remetente, número fora da faixa ou repetido, tamanho que não é o da versão declarada, tudo isso é `CAIXA_CORROMPIDA`.
 
@@ -100,7 +101,8 @@ Só então o app confirma ao relay. Se algo falhar, a carta continua esperando: 
 O teste `vetores_conhecidos` confere o SHA-256 de uma gaveta e de um índice fixos:
 
 - **gaveta:** `0aa74af231362518b38e1a503245b8c7199f9c65161267f8adee0546f2baa33e`
-- **índice (versão 2):** `c556a24c4f402677ddf9d6f9a1b020df8c044bb580f32154e459c8f90e425af3`
+- **índice (versão 3):** `c28044a0715867eaaebe6a1ff1408ed8af052e25b1a2f42285e8fcdaa1c734b0`
+- **índice (versão 2, ainda lido):** `c556a24c4f402677ddf9d6f9a1b020df8c044bb580f32154e459c8f90e425af3`
 - **índice (versão 1, ainda lido):** `9b3403a80ecb722593ac2585c1687edb0d613eb82bd6833a906ef18991721634`
 
 Os mesmos valores saem do oráculo `ferramentas/oraculos/caixa.py`, sem o Rust. Ele usa o XChaCha20-Poly1305 do oráculo da agenda, que se calibra contra o rascunho draft-irtf-cfrg-xchacha-03.
@@ -109,7 +111,7 @@ Os mesmos valores saem do oráculo `ferramentas/oraculos/caixa.py`, sem o Rust. 
 
 - **Formato (`caixa.rs`):**
   - tamanhos fixos;
-  - índice: ida e volta; cada um dos 7.357 bytes trocado é recusado; 8 índices em claro fora das regras são recusados; o da versão 1 abre sem remetente e regravado vira versão 2;
+  - índice: ida e volta; cada um dos 7.757 bytes trocado é recusado; 9 índices em claro fora das regras são recusados; os das versões 1 e 2 abrem com o que falta desconhecido e, regravados, viram versão 3;
   - gaveta:
     - ida e volta;
     - não abre com outra chave, nem em outra gaveta, nem vazia;
@@ -142,7 +144,7 @@ Os mesmos valores saem do oráculo `ferramentas/oraculos/caixa.py`, sem o Rust. 
 
 - **O texto passa pela memória e pela tela.** Quem lê a memória do app (root, depurador) vê o texto enquanto ele está aberto. O Dart não garante que as cópias sumiram antes do coletor de lixo passar.
 - **Chave do Keystore restaurada:** se o atacante já tinha root e uma cópia dos arquivos do Keystore antes da queima, ele pode restaurar a chave apagada e abrir a cópia antiga da gaveta. Só a *rollback resistance* impede isso, e o Android a esconde dos apps: o espaço dela fica reservado para chaves do sistema (`KeyProtection.Builder.setRollbackResistant` é `@hide`, conferido no código do AOSP em 07/11/2026). Nenhum app comum tem essa garantia, em aparelho nenhum.
-- **Índice antigo no armazenamento:** a troca de nome deixa versões antigas do índice em blocos livres. Com a chave do cofre (PIN + Keystore), elas mostram quantas mensagens havia e em que estado, nunca o texto nem o remetente.
+- **Índice antigo no armazenamento:** a troca de nome deixa versões antigas do índice em blocos livres. Com a chave do cofre (PIN + Keystore), elas mostram quantas mensagens havia, em que estado, de quem eram e a que horas chegaram; nunca o texto.
 - **App morto entre decifrar e reservar a gaveta:** a carta se perde. A conversa já andou, e o relay, se entregar de novo, recebe `NaoAbre`.
 - **Gaveta apagada à mão:** a leitura dela falha, e a queima a recria. O índice não confere a existência das gavetas ao abrir.
 - **Ainda não feito:** a tela da caixa e a queima ligada ao ciclo de vida do app (a cada segundo, ao sair e ao apagar a tela). `CaixaDoAparelho` já tem as chamadas; falta a tela que as faz.

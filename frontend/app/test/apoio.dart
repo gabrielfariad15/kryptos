@@ -202,11 +202,12 @@ class FabricaDeCameras {
 
 /// Uma mensagem na caixa falsa: o que a tela vê e o texto guardado.
 class GuardadaFalsa {
-  GuardadaFalsa(this.gaveta, this.remetente, this.texto);
+  GuardadaFalsa(this.gaveta, this.remetente, this.texto, [this.chegada]);
 
   final int gaveta;
   final String remetente;
   final List<int> texto;
+  final DateTime? chegada;
   bool lida = false;
 }
 
@@ -237,8 +238,8 @@ class MensageiroFalso implements Mensageiro {
   Completer<void>? segurarLeitura;
   int _proxima = 0;
 
-  void guardar(String remetente, String texto) =>
-      caixa.add(GuardadaFalsa(_proxima++, remetente, utf8.encode(texto)));
+  void guardar(String remetente, String texto, {DateTime? chegada}) => caixa
+      .add(GuardadaFalsa(_proxima++, remetente, utf8.encode(texto), chegada));
 
   @override
   Future<void> preparar() async {
@@ -265,7 +266,12 @@ class MensageiroFalso implements Mensageiro {
   @override
   Future<List<Selada>> listar() async => [
     for (final m in caixa)
-      Selada(gaveta: m.gaveta, lida: m.lida, remetente: m.remetente),
+      Selada(
+        gaveta: m.gaveta,
+        lida: m.lida,
+        remetente: m.remetente,
+        chegada: m.chegada,
+      ),
   ];
 
   @override

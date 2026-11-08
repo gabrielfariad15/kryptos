@@ -91,7 +91,8 @@ class Plantao extends ChangeNotifier {
 
   DateTime agora() => _relogio();
 
-  /// Quando a mensagem apareceu neste aparelho (nesta execução).
+  /// Quando a mensagem chegou: a hora gravada no índice da caixa ou, numa caixa
+  /// antiga, quando apareceu nesta execução.
   DateTime? chegouEm(int gaveta) => _chegouEm[gaveta];
 
   /// Quando a mensagem foi aberta pela primeira vez nesta execução.
@@ -297,8 +298,8 @@ class Plantao extends ChangeNotifier {
       final naoAbertas = await mensageiro.naoAbertas();
       final agora = this.agora();
       final gavetas = {for (final s in lista) s.gaveta};
-      for (final g in gavetas) {
-        _chegouEm.putIfAbsent(g, () => agora);
+      for (final s in lista) {
+        _chegouEm.putIfAbsent(s.gaveta, () => s.chegada ?? agora);
       }
       _chegouEm.removeWhere((g, _) => !gavetas.contains(g));
       _lidaEm.removeWhere((g, _) => !gavetas.contains(g));
