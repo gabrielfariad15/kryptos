@@ -375,6 +375,15 @@ class _LinhaDeCanal extends StatelessWidget {
                     ),
                   ),
                 ],
+                // Mostra que a linha abre a conversa (no teste de 07/11/2026 o canal
+                // não parecia tocável).
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.chevron_right,
+                  key: Key('abrir-${canal.codigo}'),
+                  size: 22,
+                  color: canal.alerta ? Cores.laranja : Cores.ambar,
+                ),
               ],
             ),
           ),

@@ -78,6 +78,8 @@ void main() {
         ),
         findsOneWidget,
       );
+      expect(find.byKey(const Key('abrir-$amigo')), findsOneWidget);
+      expect(find.byKey(const Key('abrir-$outro')), findsOneWidget);
       expect(find.text('RELAY LIGADO'), findsOneWidget);
       expect(
         tester.widget<Text>(find.byKey(const Key('codigo'))).data,
