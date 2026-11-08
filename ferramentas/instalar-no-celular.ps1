@@ -14,7 +14,7 @@
 #
 # -Relay: o teste com os dois celulares. Sobe o relay de teste nesta maquina (so em
 # 127.0.0.1, malote na memoria), monta o app com o endereco dele, liga a porta a cada
-# celular pelo adb reverse e fica esperando o Enter enquanto o teste e feito na mao.
+# celular pelo adb reverse e fica esperando FIM enquanto o teste e feito na mao.
 # No fim desliga o relay, desfaz os reverses e mostra as linhas do app no logcat de cada
 # celular (o app so grava codigos, nunca texto, chave ou codigo de contato: regra 8.2).
 # Os celulares ficam no cabo o tempo todo.
@@ -273,8 +273,13 @@ try {
         Write-Host ''
         Write-Host 'Relay de teste no ar. Faca o roteiro do teste com os dois celulares'
         Write-Host '(documentacao/arquitetura/telas-de-conversa.md, secao "Teste com os dois celulares")'
-        Write-Host 'e aperte Enter aqui quando terminar. O relay desliga e os reverses saem.'
-        [void](Read-Host)
+        Write-Host 'e digite FIM aqui quando terminar. O relay desliga e os reverses saem.'
+        # Teclas que sobraram do bloco colado no console (um Enter a mais) encerravam a
+        # espera na hora, antes do teste. Limpa o que estiver no buffer e so aceita FIM.
+        try { $Host.UI.RawUI.FlushInputBuffer() } catch { Write-Host "   aviso: nao consegui limpar o buffer do teclado ($($_.Exception.GetType().Name)); so FIM encerra" }
+        $inicioDaEspera = Get-Date
+        do { $resposta = Read-Host 'Digite FIM para encerrar' } while ($resposta.Trim().ToUpperInvariant() -ne 'FIM')
+        $resultados.Add("OK    espera do teste manual: $([math]::Round(((Get-Date) - $inicioDaEspera).TotalMinutes, 1)) min")
         $resultados.Add('OK    teste na mao terminado (o resultado e o que voce viu nos celulares)')
         # O logcat foi limpo ao abrir o app: aqui so entra a sessao do teste.
         foreach ($a in $aparelhos) {
