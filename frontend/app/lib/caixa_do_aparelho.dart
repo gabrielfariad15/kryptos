@@ -58,6 +58,8 @@ class CaixaDoAparelho {
   }
 
   /// Porta única das cartas. Em [Chegada.selada], a carta já está gravada e conferida.
+  /// Cada chegada deixa uma linha no logcat com o desfecho (sem texto nem código), para
+  /// o teste nos celulares dizer o caminho de cada carta.
   /// Se o Keystore ou o disco falharem no meio, a carta é abandonada (o texto sai da
   /// memória) e a falha sobe: a gaveta reservada queima no próximo [queimarLidas].
   Future<Chegada> receber(List<int> carta) async {
@@ -69,6 +71,10 @@ class CaixaDoAparelho {
           final h = await _traduzir(() => chave.hmac(alias(c.gaveta), c.pedido));
           hmac = h;
           await _traduzir(() => nucleo.caixaSelarChegada(hmac: h));
+          debugPrint(
+            'Kryptos: carta selada '
+            '(${c.conversaNova ? 'conversa nova' : 'conversa aberta'})',
+          );
           return Chegada.selada;
         } catch (_) {
           try {
@@ -82,12 +88,16 @@ class CaixaDoAparelho {
           _zerar(hmac);
         }
       case 'JA_GUARDADA':
+        debugPrint('Kryptos: carta ja guardada');
         return Chegada.jaGuardada;
       case 'NAO_ABRE':
+        debugPrint('Kryptos: carta nao abriu');
         return Chegada.naoAbre;
       case 'NAO_E_PARA_MIM':
+        debugPrint('Kryptos: carta para outra pessoa');
         return Chegada.naoEParaMim;
       case 'CAIXA_CHEIA':
+        debugPrint('Kryptos: caixa cheia, carta ficou no relay');
         return Chegada.caixaCheia;
       default:
         throw FalhaDoCofre('CHEGADA_${c.tipo}');

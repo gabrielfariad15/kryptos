@@ -1316,12 +1316,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ChegadaDaCarta dco_decode_chegada_da_carta(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return ChegadaDaCarta(
       tipo: dco_decode_String(arr[0]),
       gaveta: dco_decode_u_8(arr[1]),
       pedido: dco_decode_list_prim_u_8_strict(arr[2]),
+      conversaNova: dco_decode_bool(arr[3]),
     );
   }
 
@@ -1538,10 +1539,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_tipo = sse_decode_String(deserializer);
     var var_gaveta = sse_decode_u_8(deserializer);
     var var_pedido = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_conversaNova = sse_decode_bool(deserializer);
     return ChegadaDaCarta(
       tipo: var_tipo,
       gaveta: var_gaveta,
       pedido: var_pedido,
+      conversaNova: var_conversaNova,
     );
   }
 
@@ -1806,6 +1809,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.tipo, serializer);
     sse_encode_u_8(self.gaveta, serializer);
     sse_encode_list_prim_u_8_strict(self.pedido, serializer);
+    sse_encode_bool(self.conversaNova, serializer);
   }
 
   @protected

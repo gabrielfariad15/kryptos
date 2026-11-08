@@ -59,7 +59,7 @@ O campo de texto desliga a sugestão, a correção e o aprendizado do teclado (`
 - **Strings do Dart:** o texto aberto vira uma string do Dart para ser desenhado, e o texto digitado fica no controlador do campo. Strings do Dart não podem ser zeradas. Ficam na memória do app até o coletor de lixo passar.
 - **Câmera apontada para a tela:** a tela segura bloqueia o print, a gravação e a miniatura nos recentes, mas não uma câmera apontada para o celular.
 - **Leitor de tela:** segurar não tem equivalente acessível para quem usa leitor de tela. Fica para depois.
-- **Conversa encerrada do outro lado:** se o app de quem recebe fechou, a conversa dele morreu. Cartas cifradas na conversa antiga não abrem e entram no aviso "não puderam ser abertas". Quem mandou não fica sabendo.
+- **Conversa encerrada do outro lado:** se o app de quem recebe fechou, a conversa dele morreu. Cartas comuns da conversa antiga não abrem e entram no aviso "não puderam ser abertas". Quem mandou não fica sabendo. A primeira mensagem de uma conversa cuja chave avulsa ainda não foi gasta abre mesmo assim (sessao-olm.md): foi o que aconteceu no passo 8 do teste de 07/11/2026.
 - **Conferência de chave na Central:** o bloco do visual aprovado (os 12 grupos para comparar pessoalmente) ainda não existe. O canal mostra só "CHAVE NÃO CONFERIDA" em laranja para quem entrou sem QR.
 
 ## Teste com os dois celulares
@@ -70,7 +70,7 @@ Os dois celulares no cabo do mesmo computador. Uma linha:
 powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay
 ```
 
-O script sobe o relay de teste, instala o app nos dois e fica esperando o Enter. Depois do Enter, desliga o relay e mostra as linhas do app no logcat de cada celular (só códigos, regra 8.2).
+O script sobe o relay de teste, instala o app nos dois e fica esperando você digitar FIM (Enter sozinho não encerra: o Enter que sobra do bloco colado no console encerrava a espera antes do teste). Depois do FIM, desliga o relay e mostra as linhas do app no logcat de cada celular (só códigos, regra 8.2).
 
 Para filmar ou capturar a tela durante o teste, acrescente `-TelaLivre`. O app sai sem FLAG_SECURE, com uma faixa laranja "TELA LIBERADA · SÓ TESTE" em todas as telas, e a captura do script passa a ter de mostrar conteúdo. Só vale em app de debug: no de produção, o Android recusa e a tela segura fica.
 
@@ -83,4 +83,6 @@ Roteiro (A e B são os dois celulares):
 5. B responde. A recebe da mesma forma.
 6. Tentar um print em qualquer tela: sai preto ou o Android avisa que o app não deixa.
 7. B: abrir uma mensagem, apagar a tela antes do minuto e acender de novo. A mensagem lida sumiu.
-8. A: fechar o app (tirar dos recentes). B manda uma mensagem. A abre de novo: a Central mostra "1 mensagem não pôde ser aberta" (conversa encerrada, ver acima).
+8. A: fechar o app (botão de recentes, o terceiro da barra, e arrastar o Kryptos para cima; ou Configurações, Apps, Kryptos, Forçar parada). B manda uma mensagem. A abre de novo. Se a conversa já tinha ida e volta, a Central mostra "1 mensagem não pôde ser aberta"; se a mensagem de B ainda era a primeira de uma conversa, ela abre (ver acima).
+
+Depois do FIM, o script mostra o logcat de cada celular. Cada carta deixa uma linha com o caminho, sem texto nem código: `carta enviada (conversa nova | conversa aberta)`, `carta selada (conversa nova | conversa aberta)`, `carta nao abriu`, `carta ja guardada`, `carta para outra pessoa`, `caixa cheia`.

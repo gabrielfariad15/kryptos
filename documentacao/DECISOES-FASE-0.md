@@ -14,6 +14,7 @@ Mensageiro privado com criptografia de ponta a ponta e mensagens que somem depoi
 - Mensagem para quem está offline fica guardada cifrada no servidor e é apagada na entrega. Validade padrão: 7 dias.
 - O tempo de queima começa na leitura, não no envio. Padrão: 1 minuto.
 - A mensagem fica só na memória do aparelho e nunca é gravada em disco.
+  - Revisto em 07/11/2026: a mensagem recebida e ainda não lida fica gravada **selada** no aparelho, numa gaveta de tamanho fixo cuja chave mora no Keystore, até a pessoa segurar para ler. Depois da leitura, conta 1 minuto e a gaveta é sobrescrita e a chave trocada. Em claro, o texto continua só na memória. Ver `documentacao/arquitetura/caixa-selada.md`.
 - Conversa entre duas pessoas e em grupo.
 - Alvo final: Android, iPhone, Windows, macOS e Linux.
 

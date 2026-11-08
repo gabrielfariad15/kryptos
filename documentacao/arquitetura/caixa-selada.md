@@ -7,7 +7,7 @@ Guardar a mensagem recebida até a pessoa decidir ler, sem deixar o texto no dis
 - **Selar na chegada.** O núcleo abre a camada Olm só na memória e sela o texto com a chave de uma gaveta. O texto só abre quando a pessoa manda descriptografar.
 - **Sem aviso de leitura e sem "digitando".** O relay não tem canal de volta para quem mandou.
 - **Queima:** 1 minuto depois de lida. Na hora, ao sair do app ou ao apagar a tela.
-- **Carta de conversa encerrada** (o app fechou e a conversa morreu): não abre, e a tela mostra só "N mensagens não puderam ser abertas".
+- **Carta de conversa encerrada** (o app fechou e a conversa morreu): não abre, e a tela mostra só "N mensagens não puderam ser abertas". Exceção: a primeira mensagem de uma conversa cuja chave avulsa ainda não foi gasta abre mesmo depois de reabrir o app (sessao-olm.md).
 - **Capacidade e limite:** 100 mensagens não queimadas, de até 65.536 bytes de texto cada (uns 60 mil caracteres em português, estimo).
 
 ## Arquivos

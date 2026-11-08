@@ -1349,10 +1349,12 @@ impl SseDecode for crate::api::nucleo::ChegadaDaCarta {
         let mut var_tipo = <String>::sse_decode(deserializer);
         let mut var_gaveta = <u8>::sse_decode(deserializer);
         let mut var_pedido = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_conversaNova = <bool>::sse_decode(deserializer);
         return crate::api::nucleo::ChegadaDaCarta {
             tipo: var_tipo,
             gaveta: var_gaveta,
             pedido: var_pedido,
+            conversa_nova: var_conversaNova,
         };
     }
 }
@@ -1703,6 +1705,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::nucleo::ChegadaDaCarta {
             self.tipo.into_into_dart().into_dart(),
             self.gaveta.into_into_dart().into_dart(),
             self.pedido.into_into_dart().into_dart(),
+            self.conversa_nova.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -1898,6 +1901,7 @@ impl SseEncode for crate::api::nucleo::ChegadaDaCarta {
         <String>::sse_encode(self.tipo, serializer);
         <u8>::sse_encode(self.gaveta, serializer);
         <Vec<u8>>::sse_encode(self.pedido, serializer);
+        <bool>::sse_encode(self.conversa_nova, serializer);
     }
 }
 

@@ -18,6 +18,16 @@ A escreve primeiro para B.
 4. A primeira mensagem de A leva o que B precisa para abrir o lado dele. B abre com `Sessao::receber_primeira`, e só aceita se a mensagem veio da Curve25519 de A lida no QR.
 5. Daí em diante, os dois lados usam `cifrar` e `decifrar`. As mensagens que A mandar antes de B responder também são "primeiras", mas B abre todas com a sessão que já abriu (`decifrar`). Se tentar abrir outra sessão com elas, a chave avulsa já foi gasta.
 
+## Várias conversas com o mesmo contato (decidido em 07/11/2026)
+
+No teste com os dois celulares, os dois lados podem abrir conversa ao mesmo tempo: cada um manda a primeira antes de receber a do outro. Antes, o núcleo guardava uma conversa só por contato, e a primeira que chegava substituía a outra. Tudo o que viesse pela conversa substituída deixava de abrir. O teste `cruzamento_de_primeiras_mensagens_nao_perde_nada` reproduziu a perda: a segunda carta de A veio `NaoAbre`.
+
+A regra agora é a do Olm no Matrix (especificação do m.olm.v1, proposta MSC1719). Código: `nucleo/src/conversas.rs`.
+
+- **Guardar:** cada conversa nova (aberta por mim ou pelo outro) fica guardada junto das anteriores com o mesmo contato. Até 4 por contato (estimo que cubra o cruzamento e uma conversa reaberta com cartas no caminho); passando disso, sai a mais antiga.
+- **Receber:** a primeira mensagem procura uma conversa guardada com o mesmo identificador; se não há, abre conversa nova. A mensagem comum tenta as conversas guardadas, da mais recente para a mais antiga. Tentar a conversa errada não estraga nada: o vodozemac só mexe na conversa quando a autenticação confere.
+- **Mandar:** pela conversa que decifrou uma mensagem por último; se nenhuma decifrou ainda, pela criada por último. Assim os dois lados acabam na mesma conversa (o teste `cruzamento_converge_e_tudo_abre_dos_dois_lados` confere).
+
 ## Por onde a chave avulsa chega (decidido em 07/11/2026)
 
 O caminho escolhido é o **servidor de repasse**, com um estoque de chaves avulsas assinadas e **sem chave reserva**. O QR continua na versão 1, só com a identidade. O modelo vem do Signal (X3DH: pré-chaves publicadas no servidor, entregues uma vez e apagadas), sem a pré-chave de médio prazo: uma mensagem feita com uma chave que não se gasta poderia ser repetida e reaparecer depois de queimada.
@@ -102,6 +112,7 @@ O Olm confere o MAC sobre a mensagem **recodificada**, e não sobre os bytes que
 - A chamada ao relay a partir do app (ponte, rede e TLS).
 - Ponte, tela e prova no aparelho (regra 5.5). Este passo prova o protocolo com as duas contas no mesmo processo, e não a troca entre os dois celulares.
 - A conversa fica só em memória. Depois de reabrir o app, as mensagens comuns de uma conversa anterior são recusadas (`SEM_CONVERSA`). Gravar as conversas no cofre é assunto próprio.
+  - Exceção, vista no teste com os dois celulares: enquanto quem abriu a conversa não recebe resposta, tudo o que manda é "primeira mensagem". Se o outro fecha o app antes de receber, a chave avulsa continua no cofre e a carta abre depois de reabrir (teste `primeira_mensagem_ainda_nao_recebida_abre_depois_de_reabrir`). Depois que a chave é gasta e o app fecha de novo, as seguintes da mesma conversa não abrem.
 - Com o cofre aberto, a chave do cofre fica na memória junto da conta, para regravar. Quem lê a memória do app já lê a conta, então isso acrescenta pouco, mas está registrado.
 - A queima (1 minuto depois da leitura) e a mensagem só em memória na tela ainda não existem. O núcleo devolve o texto em `Zeroizing`, mas a cópia que a tela fizer é assunto da etapa da queima.
 - O cartão do QR aceita qualquer Curve25519, inclusive de ordem baixa. Hoje a recusa acontece ao abrir a sessão. Recusar já na leitura do QR mexe no cartão e é assunto próprio.

@@ -226,14 +226,20 @@ class ChegadaDaCarta {
   final int gaveta;
   final Uint8List pedido;
 
+  /// Em SELAR: a carta abriu uma conversa nova (gastou uma chave avulsa). Só para o
+  /// registro do app (sem texto nem código).
+  final bool conversaNova;
+
   const ChegadaDaCarta({
     required this.tipo,
     required this.gaveta,
     required this.pedido,
+    required this.conversaNova,
   });
 
   @override
-  int get hashCode => tipo.hashCode ^ gaveta.hashCode ^ pedido.hashCode;
+  int get hashCode =>
+      tipo.hashCode ^ gaveta.hashCode ^ pedido.hashCode ^ conversaNova.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -242,7 +248,8 @@ class ChegadaDaCarta {
           runtimeType == other.runtimeType &&
           tipo == other.tipo &&
           gaveta == other.gaveta &&
-          pedido == other.pedido;
+          pedido == other.pedido &&
+          conversaNova == other.conversaNova;
 }
 
 /// Um contato da agenda desta execução.

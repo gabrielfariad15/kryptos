@@ -262,6 +262,9 @@ pub struct ChegadaDaCarta {
     pub tipo: String,
     pub gaveta: u8,
     pub pedido: Vec<u8>,
+    /// Em SELAR: a carta abriu uma conversa nova (gastou uma chave avulsa). Só para o
+    /// registro do app (sem texto nem código).
+    pub conversa_nova: bool,
 }
 
 pub fn caixa_receber_carta(carta: Vec<u8>) -> anyhow::Result<ChegadaDaCarta> {
@@ -269,12 +272,18 @@ pub fn caixa_receber_carta(carta: Vec<u8>) -> anyhow::Result<ChegadaDaCarta> {
         tipo: tipo.to_string(),
         gaveta: 0,
         pedido: Vec::new(),
+        conversa_nova: false,
     };
     Ok(match aparelho::receber_carta(&carta).map_err(erro_caixa)? {
-        aparelho::Chegada::Selar { gaveta, pedido } => ChegadaDaCarta {
+        aparelho::Chegada::Selar {
+            gaveta,
+            pedido,
+            conversa_nova,
+        } => ChegadaDaCarta {
             tipo: "SELAR".to_string(),
             gaveta,
             pedido: pedido.to_vec(),
+            conversa_nova,
         },
         aparelho::Chegada::JaGuardada => simples("JA_GUARDADA"),
         aparelho::Chegada::NaoAbre => simples("NAO_ABRE"),

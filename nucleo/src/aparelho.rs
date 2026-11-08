@@ -13,7 +13,8 @@
 //!   da câmera (ou `adicionar_contato_por_qr` com o texto já lido). Com o cofre aberto,
 //!   o contato só entra na memória depois de a agenda nova estar gravada e lida de
 //!   volta. Antes de o cofre existir, fica só na memória e vai junto na criação.
-//! Conversas (só em memória; documentacao/arquitetura/sessao-olm.md):
+//! Conversas (só em memória, várias por contato: conversas.rs;
+//! documentacao/arquitetura/sessao-olm.md):
 //!   `nova_chave_avulsa` para B publicar; `abrir_conversa` e `cifrar` em A; `receber`
 //!   nos dois lados.
 //! Caixa selada (documentacao/arquitetura/caixa-selada.md), com o cofre aberto:
@@ -48,6 +49,7 @@ use crate::cartao::CartaoContato;
 use crate::codigo::CodigoContato;
 use crate::cofre::{self, Custo, ErroCofre, Resultado, TAMANHO_CHAVE, TAMANHO_SAL, Varredura};
 use crate::contatos::{Adicao, Agenda, Contato, ErroAgenda};
+use crate::conversas::Conversas;
 use crate::identidade::Identidade;
 use crate::qr::{self, GradeQr};
 use crate::sessao::{ChaveAvulsa, ErroSessao, Sessao};
@@ -70,8 +72,8 @@ struct Memoria {
     agenda: Agenda,
     /// A caixa selada, só com o cofre aberto.
     caixa: Option<Caixa>,
-    /// Uma conversa por contato, a mais recente. Poucos contatos: busca linear.
-    conversas: Vec<(CodigoContato, Sessao)>,
+    /// Conversas desta execução, várias por contato (conversas.rs).
+    conversas: Conversas,
 }
 
 /// O índice da caixa e o que só vive na memória: a chegada à espera do Keystore, a
@@ -110,7 +112,7 @@ impl Memoria {
             selo,
             agenda,
             caixa: None,
-            conversas: Vec::new(),
+            conversas: Conversas::nova(),
         }
     }
 
@@ -123,16 +125,14 @@ impl Memoria {
             .ok_or(ErroConversa::ContatoDesconhecido)
     }
 
+    /// A conversa por onde mandar para o contato.
     fn conversa(&mut self, codigo: CodigoContato) -> Option<&mut Sessao> {
-        self.conversas
-            .iter_mut()
-            .find(|(c, _)| *c == codigo)
-            .map(|(_, s)| s)
+        self.conversas.ativa(codigo)
     }
 
+    /// Guarda a conversa nova como a ativa; as anteriores com o contato ficam.
     fn guardar_conversa(&mut self, codigo: CodigoContato, sessao: Sessao) {
-        self.conversas.retain(|(c, _)| *c != codigo);
-        self.conversas.push((codigo, sessao));
+        self.conversas.guardar(codigo, sessao);
     }
 
     /// Grava a conta da memória no cofre e prova lendo de volta.
@@ -507,9 +507,7 @@ pub fn preparar_publicacao(quantas: usize, numero: u64) -> Result<Vec<u8>, ErroC
 
 /// Há conversa aberta com o contato nesta execução do app?
 pub fn tem_conversa(codigo: CodigoContato) -> bool {
-    trava()
-        .as_ref()
-        .is_some_and(|m| m.conversas.iter().any(|(c, _)| *c == codigo))
+    trava().as_ref().is_some_and(|m| m.conversas.tem(codigo))
 }
 
 /// Ed25519 do contato da agenda, para pedir a chave avulsa dele no relay. Pública.
@@ -530,8 +528,8 @@ pub fn preparar_busca(
     Ok(memoria.identidade.busca(numero, confirmadas)?)
 }
 
-/// A abre a conversa com um contato da agenda, com a chave avulsa dele. Substitui a
-/// conversa anterior com o mesmo contato, se houver.
+/// A abre a conversa com um contato da agenda, com a chave avulsa dele. A nova vira a
+/// ativa; as anteriores com o mesmo contato ficam, para as cartas que ainda vêm por elas.
 pub fn abrir_conversa(codigo: CodigoContato, avulsa: &ChaveAvulsa) -> Result<(), ErroConversa> {
     let mut guarda = trava();
     let memoria = guarda.as_mut().ok_or(ErroConversa::SemIdentidade)?;
@@ -592,13 +590,10 @@ pub fn receber(
     let mut guarda = trava();
     let memoria = guarda.as_mut().ok_or(ErroConversa::SemIdentidade)?;
     let contato = memoria.contato(codigo)?;
-    if let OlmMessage::PreKey(primeira) = mensagem {
-        let ja_aberta = memoria
-            .conversa(codigo)
-            .filter(|s| s.identificador() == primeira.session_id());
-        if let Some(sessao) = ja_aberta {
-            return Ok(sessao.decifrar(mensagem)?);
-        }
+    if let Some(r) = memoria.conversas.decifrar_primeira(codigo, mensagem) {
+        return Ok(r?);
+    }
+    if let OlmMessage::PreKey(_) = mensagem {
         if memoria.selo.is_none() {
             return Err(ErroConversa::CofreFechado);
         }
@@ -608,8 +603,10 @@ pub fn receber(
         memoria.guardar_conversa(codigo, sessao);
         return Ok(texto);
     }
-    let sessao = memoria.conversa(codigo).ok_or(ErroConversa::SemConversa)?;
-    Ok(sessao.decifrar(mensagem)?)
+    match memoria.conversas.decifrar_comum_de(codigo, mensagem) {
+        Some(r) => Ok(r?),
+        None => Err(ErroConversa::SemConversa),
+    }
 }
 
 // ---------------------------------------------------------------- caixa selada
@@ -667,9 +664,12 @@ impl From<ErroCofre> for ErroCaixa {
 pub enum Chegada {
     /// Decifrada e com gaveta reservada: pedir ao Keystore o HMAC de `pedido` com a
     /// chave da `gaveta` e chamar `selar_chegada`. Só depois confirmar ao relay.
+    /// `conversa_nova`: a carta abriu uma conversa (gastou uma chave avulsa); falso
+    /// quando veio por uma conversa já aberta. Só para o registro do app.
     Selar {
         gaveta: u8,
         pedido: [u8; TAMANHO_PEDIDO],
+        conversa_nova: bool,
     },
     /// A mesma carta já está numa gaveta (o relay entregou de novo): confirmar.
     JaGuardada,
@@ -740,8 +740,8 @@ fn trocar_indice(selo: &Selo, caixa: &mut Caixa, novo: Indice) -> Result<(), Err
     Ok(())
 }
 
-/// Quem mandou e o texto.
-type Decifrada = (Contato, Zeroizing<Vec<u8>>);
+/// Quem mandou, o texto e se a carta abriu uma conversa nova.
+type Decifrada = (Contato, Zeroizing<Vec<u8>>, bool);
 
 /// Decifra a mensagem de quem estiver na agenda. `None`: não abre.
 /// Primeira mensagem de conversa nova: abre a conversa e grava a conta (chave avulsa
@@ -763,11 +763,8 @@ fn decifrar_de_alguem(
             return Ok(None);
         };
         let codigo = contato.codigo();
-        let ja_aberta = memoria
-            .conversa(codigo)
-            .filter(|s| s.identificador() == primeira.session_id());
-        if let Some(sessao) = ja_aberta {
-            return Ok(sessao.decifrar(mensagem).ok().map(|t| (contato, t)));
+        if let Some(r) = memoria.conversas.decifrar_primeira(codigo, mensagem) {
+            return Ok(r.ok().map(|t| (contato, t, false)));
         }
         let Ok((sessao, texto)) =
             Sessao::receber_primeira(&mut memoria.identidade, &contato, mensagem)
@@ -782,18 +779,14 @@ fn decifrar_de_alguem(
             return Err(ErroCaixa::Cofre(ErroCofre::ArquivoCorrompido));
         }
         memoria.guardar_conversa(codigo, sessao);
-        return Ok(Some((contato, texto)));
+        return Ok(Some((contato, texto, true)));
     }
-    // Mensagem comum não diz de quem é: tenta cada conversa aberta. O vodozemac só
-    // muda a conversa quando a autenticação da mensagem confere.
-    for (codigo, sessao) in &mut memoria.conversas {
-        if let Ok(texto) = sessao.decifrar(mensagem) {
-            let codigo = *codigo;
-            let contato = memoria.contato(codigo).map_err(|_| ErroCaixa::Estado)?;
-            return Ok(Some((contato, texto)));
-        }
-    }
-    Ok(None)
+    // Mensagem comum não diz de quem é: tenta as conversas abertas (conversas.rs).
+    let Some((codigo, texto)) = memoria.conversas.decifrar_comum(mensagem) else {
+        return Ok(None);
+    };
+    let contato = memoria.contato(codigo).map_err(|_| ErroCaixa::Estado)?;
+    Ok(Some((contato, texto, false)))
 }
 
 /// Porta única das cartas, venham do relay ou do modo Direto.
@@ -833,7 +826,8 @@ pub fn receber_carta(bytes: &[u8]) -> Result<Chegada, ErroCaixa> {
             caixa.nao_abertas = caixa.nao_abertas.saturating_add(1);
             return Ok(Chegada::NaoAbre);
         };
-        let Some((contato, texto)) = decifrar_de_alguem(memoria, selo, &mensagem)? else {
+        let Some((contato, texto, conversa_nova)) = decifrar_de_alguem(memoria, selo, &mensagem)?
+        else {
             caixa.nao_abertas = caixa.nao_abertas.saturating_add(1);
             return Ok(Chegada::NaoAbre);
         };
@@ -861,6 +855,7 @@ pub fn receber_carta(bytes: &[u8]) -> Result<Chegada, ErroCaixa> {
         Ok(Chegada::Selar {
             gaveta,
             pedido: caixa::pedido(gaveta, &nonce),
+            conversa_nova,
         })
     })
 }
@@ -1833,7 +1828,7 @@ mod testes {
     /// Recebe e sela pelo caminho do app. Devolve a gaveta.
     fn chegar(ks: &KeystoreDasGavetas, carta: &[u8]) -> Result<u8, Box<dyn std::error::Error>> {
         match receber_carta(carta)? {
-            Chegada::Selar { gaveta, pedido } => Ok(selar_chegada(&ks.hmac(gaveta, &pedido))?),
+            Chegada::Selar { gaveta, pedido, .. } => Ok(selar_chegada(&ks.hmac(gaveta, &pedido))?),
             outra => Err(format!("esperava Selar, veio {outra:?}").into()),
         }
     }
@@ -2063,7 +2058,7 @@ mod testes {
             let ks = KeystoreDasGavetas::novo();
             b_com_cofre(pasta)?;
             let (_a, mut sessao_a) = a_conversa_com_b()?;
-            let Chegada::Selar { gaveta, pedido } =
+            let Chegada::Selar { gaveta, pedido, .. } =
                 receber_carta(&carta_para_b(&sessao_a.cifrar(b"guardar")?)?)?
             else {
                 return Err("esperava Selar".into());
@@ -2159,6 +2154,106 @@ mod testes {
                 cifrar_carta(a.codigo_contato(), &vec![0u8; caixa::MAXIMO_TEXTO + 1]).err(),
                 Some(ErroConversa::TextoGrande)
             );
+            Ok(())
+        })
+    }
+
+    /// Os dois abrem conversa ao mesmo tempo: cada um manda a primeira antes de receber
+    /// a do outro (achado no teste com os dois celulares, 07/11/2026). Depois disso,
+    /// tudo o que cada lado mandar tem de abrir do outro lado.
+    #[test]
+    fn cruzamento_de_primeiras_mensagens_nao_perde_nada() -> Result<(), Box<dyn std::error::Error>>
+    {
+        com_pasta("cruzamento", |pasta| {
+            let ks = KeystoreDasGavetas::novo();
+            b_com_cofre(pasta)?;
+            let avulsa_de_b = nova_chave_avulsa()?;
+            let (mut a, b_para_a) = a_que_leu_o_qr_de_b()?;
+            let codigo_a = b_le_o_qr_de(&a)?;
+            let a_para_b = contatos()
+                .into_iter()
+                .find(|c| c.codigo() == codigo_a)
+                .ok_or("A fora da agenda de B")?;
+
+            // A abre e manda; B, sem ter recebido, abre com uma chave avulsa de A e manda.
+            let mut sessao_a = Sessao::abrir(&a, &b_para_a, &avulsa_de_b)?;
+            let a1 = sessao_a.cifrar(b"a1")?;
+            let avulsa_de_a = a.nova_chave_avulsa()?;
+            abrir_conversa(codigo_a, &avulsa_de_a)?;
+            let b1 = cifrar(codigo_a, b"b1")?;
+            assert!(matches!(b1, OlmMessage::PreKey(_)));
+
+            // As duas primeiras chegam.
+            let g = chegar(&ks, &carta_para_b(&a1)?)?;
+            assert_eq!(
+                ler_pelo_app(&ks, g, Instant::now())?.texto.as_slice(),
+                b"a1"
+            );
+            let (mut sessao_a_de_b, t) = Sessao::receber_primeira(&mut a, &b_para_a, &b1)?;
+            assert_eq!(t.as_slice(), b"b1");
+            // B guardou as duas conversas com A: a que abriu e a que A abriu.
+            assert_eq!(
+                trava()
+                    .as_ref()
+                    .map(|m| m.conversas.quantas(a_para_b.codigo())),
+                Some(2)
+            );
+
+            // A manda pela conversa que ela abriu (ainda pode haver carta no caminho)
+            // e pela que B abriu (a última que decifrou algo do lado de A).
+            let a3 = sessao_a.cifrar(b"a3")?;
+            let g3 = chegar(&ks, &carta_para_b(&a3)?).map_err(|e| format!("a3: {e}"))?;
+            assert_eq!(
+                ler_pelo_app(&ks, g3, Instant::now())?.texto.as_slice(),
+                b"a3"
+            );
+            let a2 = sessao_a_de_b.cifrar(b"a2")?;
+            let g2 = chegar(&ks, &carta_para_b(&a2)?).map_err(|e| format!("a2: {e}"))?;
+            assert_eq!(
+                ler_pelo_app(&ks, g2, Instant::now())?.texto.as_slice(),
+                b"a2"
+            );
+            assert_eq!(nao_abertas()?, 0);
+
+            // B passa a mandar pela conversa que decifrou por último, e A abre.
+            let ativa = trava()
+                .as_mut()
+                .and_then(|m| m.conversas.ativa(codigo_a).map(|s| s.identificador()));
+            assert_eq!(ativa, Some(sessao_a_de_b.identificador()));
+            let b2 = cifrar(codigo_a, b"b2")?;
+            assert_eq!(sessao_a_de_b.decifrar(&b2)?.as_slice(), b"b2");
+            Ok(())
+        })
+    }
+
+    /// O que o teste com os dois celulares mostrou (07/11/2026): enquanto quem abriu a
+    /// conversa não recebe resposta, tudo o que manda é "primeira mensagem", com a
+    /// chave avulsa do outro. Se o outro fecha o app antes de receber, a chave continua
+    /// no cofre e a carta abre depois de reabrir. A mesma carta, ou outra da mesma
+    /// conversa depois de a chave ser gasta e o app fechar de novo, não abre.
+    #[test]
+    fn primeira_mensagem_ainda_nao_recebida_abre_depois_de_reabrir()
+    -> Result<(), Box<dyn std::error::Error>> {
+        com_pasta("primeira-reabrir", |pasta| {
+            let ks = KeystoreDasGavetas::novo();
+            b_com_cofre(pasta)?;
+            let (_a, mut sessao_a) = a_conversa_com_b()?;
+            let m1 = sessao_a.cifrar(b"m1")?;
+            let m2 = sessao_a.cifrar(b"m2")?;
+            assert!(matches!(m2, OlmMessage::PreKey(_)));
+
+            // B fecha antes de receber: a chave avulsa está no cofre.
+            reabrir(pasta)?;
+            let g1 = chegar(&ks, &carta_para_b(&m1)?)?;
+            assert_eq!(
+                ler_pelo_app(&ks, g1, Instant::now())?.texto.as_slice(),
+                b"m1"
+            );
+
+            // B fecha de novo: a conversa morre e a chave já está gasta no cofre.
+            reabrir(pasta)?;
+            assert_eq!(receber_carta(&carta_para_b(&m2)?)?, Chegada::NaoAbre);
+            assert_eq!(nao_abertas()?, 1);
             Ok(())
         })
     }

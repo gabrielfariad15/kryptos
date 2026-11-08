@@ -8,8 +8,7 @@
 //
 // Nada de texto, carta, dono ou código de contato em log (regra 8.2).
 
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge.dart';
 
 import 'caixa_do_aparelho.dart';
@@ -84,13 +83,18 @@ class Correio {
   /// Cifra o texto para o contato e deixa a carta no relay. Sem conversa aberta nesta
   /// execução, abre uma antes.
   Future<void> enviar(String codigo, List<int> texto) async {
-    if (!_nucleoSync(() => nucleo.temConversa(codigo: codigo))) {
+    final nova = !_nucleoSync(() => nucleo.temConversa(codigo: codigo));
+    if (nova) {
       await abrirConversa(codigo);
     }
     final carta = await _nucleo(
       () => nucleo.cifrarCarta(codigo: codigo, texto: texto),
     );
     await relay.depositar(carta);
+    // Só o caminho, para o teste nos celulares (regra 8.2: nada de texto ou código).
+    debugPrint(
+      'Kryptos: carta enviada (${nova ? 'conversa nova' : 'conversa aberta'})',
+    );
   }
 
   /// Busca as cartas no relay, sela cada uma na caixa e confirma as que não precisam

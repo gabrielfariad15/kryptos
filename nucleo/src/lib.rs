@@ -22,6 +22,7 @@ pub mod cartao;
 pub mod codigo;
 pub mod cofre;
 pub mod contatos;
+pub mod conversas;
 pub mod identidade;
 pub mod qr;
 pub mod sessao;
