@@ -9,6 +9,7 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Serial <serial>
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -Relay -TelaLivre
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -RelayPublico -TelaLivre
 #
 # Sem parametro: exige um unico celular no cabo. Com mais de um, use -Todos ou -Serial.
 #
@@ -18,6 +19,14 @@
 # No fim desliga o relay, desfaz os reverses e mostra as linhas do app no logcat de cada
 # celular (o app so grava codigos, nunca texto, chave ou codigo de contato: regra 8.2).
 # Os celulares ficam no cabo o tempo todo.
+#
+# -RelayPublico: o teste com os celulares fora do cabo (4G ou outra rede). Usa o relay
+# que o ferramentas\relay-publico.ps1 pos na internet pelo Tailscale Funnel, rodando em
+# outra janela: le o endereco https://...ts.net que ele gravou, confere o /saude e monta
+# o app com esse endereco. Sem adb reverse: o celular vai ao relay pela internet. O cabo
+# continua so para instalar, ler o logcat e capturar. A espera por FIM e as capturas sao
+# as mesmas do -Relay. Diz se o Wi-Fi de cada celular esta ligado (para o teste pelo 4G,
+# desligue). Nao combina com -Relay.
 #
 # -TelaLivre: so para filmar e capturar no teste. Monta o app sem FLAG_SECURE (o Android
 # so aceita em app de debug) e com uma faixa laranja "TELA LIBERADA" em todas as telas.
@@ -38,6 +47,7 @@ param(
     [switch]$Todos,
     [string]$Serial,
     [switch]$Relay,
+    [switch]$RelayPublico,
     [switch]$TelaLivre
 )
 
@@ -61,6 +71,9 @@ $logsRelay = @()
 $comReverse = New-Object System.Collections.Generic.List[string]
 $jobCapturas = $null
 $pararCapturas = $null
+# Endereco que o relay-publico.ps1 grava enquanto esta no ar (o mesmo caminho dele).
+$arqEnderecoPublico = Join-Path (Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Kryptos') 'relay-publico') 'endereco.txt'
+$enderecoPublico = $null
 
 function Rodar([string]$Exe, [string[]]$Argumentos) {
     $antes = $ErrorActionPreference
@@ -94,6 +107,7 @@ function Achar([string]$Pasta, [string[]]$Nomes) {
 $ok = $false
 try {
     if ($Todos -and $Serial) { throw 'use -Todos ou -Serial, nao os dois' }
+    if ($Relay -and $RelayPublico) { throw 'use -Relay ou -RelayPublico, nao os dois' }
     $flutter = Achar (Join-Path $Amb.flutter 'bin') @('flutter.bat', 'flutter')
     $adb = Achar (Join-Path $Amb.android_sdk 'platform-tools') @('adb.exe', 'adb')
     $app = Join-Path (Join-Path $Repo 'frontend') 'app'
@@ -164,6 +178,26 @@ try {
         }
     }
 
+    # ---------- relay na internet (so com -RelayPublico) ----------
+    if ($RelayPublico) {
+        Passo 'relay na internet (relay-publico.ps1)' {
+            if (-not (Test-Path -LiteralPath $arqEnderecoPublico)) {
+                throw "nao achei $arqEnderecoPublico. Rode antes, em outra janela: powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\relay-publico.ps1"
+            }
+            $e = ([System.IO.File]::ReadAllText($arqEnderecoPublico)).Trim()
+            if ($e -notmatch '^https://[a-z0-9-]+\.[a-z0-9-]+\.ts\.net$') { throw "endereco inesperado em $arqEnderecoPublico : '$e'" }
+            # curl.exe: no Windows PowerShell 5.1, "curl" e apelido do Invoke-WebRequest.
+            $curl = if ($env:OS -eq 'Windows_NT') { 'curl.exe' } else { 'curl' }
+            $antes = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try { $cod = (@(& $curl -sS -o ([System.IO.Path]::GetTempPath() + 'kryptos-saude.txt') -w '%{http_code}' --max-time 20 "$e/saude" 2>&1) | ForEach-Object { "$_" }) -join ' ' }
+            finally { $ErrorActionPreference = $antes; Remove-Item -LiteralPath ([System.IO.Path]::GetTempPath() + 'kryptos-saude.txt') -Force -ErrorAction SilentlyContinue }
+            if ($cod.Trim() -notmatch '200$') { throw "o relay em $e nao respondeu (/saude: $($cod.Trim())). O relay-publico.ps1 ainda esta aberto na outra janela?" }
+            $script:enderecoPublico = $e
+            "$e, /saude 200"
+        }
+    }
+
     # ---------- compilar uma vez ----------
     $apk = Join-Path $app 'build\app\outputs\flutter-apk\app-debug.apk'
     Passo 'compilar APK de debug (arm64)' {
@@ -171,10 +205,11 @@ try {
         Write-Host '   Gradle + Rust para Android; a primeira vez demora'
         $argsBuild = @('build', 'apk', '--debug', '--target-platform', 'android-arm64')
         if ($Relay) { $argsBuild += "--dart-define=KRYPTOS_RELAY=http://127.0.0.1:$portaRelay" }
+        if ($RelayPublico) { $argsBuild += "--dart-define=KRYPTOS_RELAY=$enderecoPublico" }
         if ($TelaLivre) { $argsBuild += '--dart-define=KRYPTOS_TELA_LIVRE=true' }
         Rodar $flutter $argsBuild | Out-Null
         if (-not (Test-Path -LiteralPath $apk)) { throw "o build terminou mas nao achei $apk" }
-        $comRelay = if ($Relay) { 'com o relay de teste' } else { 'sem relay' }
+        $comRelay = if ($Relay) { 'com o relay de teste' } elseif ($RelayPublico) { "com o relay $enderecoPublico" } else { 'sem relay' }
         $comTela = if ($TelaLivre) { 'TELA LIVRE (sem FLAG_SECURE)' } else { 'tela segura' }
         "$([math]::Round((Get-Item -LiteralPath $apk).Length / 1MB, 1)) MB, $comRelay, $comTela"
     }
@@ -218,6 +253,19 @@ try {
                 Rodar $adb @('-s', $s, 'reverse', "tcp:$portaRelay", "tcp:$portaRelay") | Out-Null
                 $comReverse.Add($s)
                 "tcp:$portaRelay do celular -> tcp:$portaRelay desta maquina"
+            }
+        }
+
+        if ($RelayPublico) {
+            # So informa: o caminho e pela internet tanto no Wi-Fi quanto no 4G. Para
+            # provar que nao depende da rede de casa, o teste pede o Wi-Fi desligado.
+            Passo "$modeloAtual : rede" {
+                $w = ''
+                try { $w = ((Rodar $adb @('-s', $s, 'shell', 'cmd', 'wifi', 'status')) -split "`n")[0].Trim() }
+                catch { $w = "nao consegui ler ($($_.Exception.Message -split "`n" | Select-Object -First 1))" }
+                if ($w -match 'disabled') { 'Wi-Fi desligado: vai pelo 4G' }
+                elseif ($w -match 'enabled') { 'Wi-Fi LIGADO: para o teste pelo 4G, desligue o Wi-Fi deste celular' }
+                else { "Wi-Fi: $w" }
             }
         }
 
@@ -276,11 +324,17 @@ try {
         }
     }
 
-    if ($Relay) {
+    if ($Relay -or $RelayPublico) {
         Write-Host ''
-        Write-Host 'Relay de teste no ar. Faca o roteiro do teste com os dois celulares'
-        Write-Host '(documentacao/arquitetura/telas-de-conversa.md, secao "Teste com os dois celulares")'
-        Write-Host 'e digite FIM aqui quando terminar. O relay desliga e os reverses saem.'
+        if ($Relay) {
+            Write-Host 'Relay de teste no ar. Faca o roteiro do teste com os dois celulares'
+            Write-Host '(documentacao/arquitetura/telas-de-conversa.md, secao "Teste com os dois celulares")'
+            Write-Host 'e digite FIM aqui quando terminar. O relay desliga e os reverses saem.'
+        } else {
+            Write-Host "Apps montados com o relay $enderecoPublico. Faca o roteiro do teste fora do cabo"
+            Write-Host '(documentacao/arquitetura/relay-publico.md) e digite FIM aqui quando terminar.'
+            Write-Host 'O relay continua no ar na outra janela ate o FIM de la.'
+        }
         # Teclas que sobraram do bloco colado no console (um Enter a mais) encerravam a
         # espera na hora, antes do teste. Limpa o que estiver no buffer e so aceita FIM.
         try { $Host.UI.RawUI.FlushInputBuffer() } catch { Write-Host "   aviso: nao consegui limpar o buffer do teclado ($($_.Exception.GetType().Name)); so FIM encerra" }

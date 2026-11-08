@@ -77,6 +77,8 @@ Para filmar ou capturar a tela durante o teste, acrescente `-TelaLivre`. O app s
 
 Com `-Relay -TelaLivre`, o script também captura as telas dos dois celulares sozinho durante o teste: a cada linha nova do app no logcat (carta enviada, selada, não abriu) e a cada 15 s. As capturas e um `eventos.txt` com o roteiro do que aconteceu vão para uma pasta `kryptos-teste-<data>` em Downloads e, no fim, para um zip de mesmo nome, pronto para anexar.
 
+Para o mesmo teste fora do cabo, pelo 4G, com o relay na internet a partir do PC: `relay-publico.md`.
+
 Roteiro (A e B são os dois celulares):
 
 1. Nos dois: abrir com o PIN. A Central mostra "RELAY LIGADO".
