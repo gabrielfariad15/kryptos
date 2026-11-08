@@ -428,6 +428,16 @@ try {
         }
 
         Passo "$modeloAtual : captura da tela" {
+            # -SondaBle: na primeira abertura a sonda pede "dispositivos por perto", e o aviso
+            # e uma janela do Android, fora do FLAG_SECURE: a captura pega o aviso (teste de
+            # 08/11/2026: captura as 14:06:04, permissao dada as 14:06:05). Sem a permissao,
+            # nada se conclui pela captura; com ela, a conferencia roda como sempre.
+            if ($SondaBle) {
+                $perm = Rodar $adb @('-s', $s, 'shell', 'dumpsys', 'package', $Pacote)
+                if ($perm -notmatch 'android\.permission\.BLUETOOTH_SCAN: granted=true') {
+                    return 'SEM CONFERENCIA: o aviso de permissao do Android esta na tela (janela do sistema, fora do FLAG_SECURE). Toque Permitir no celular; a tela segura e conferida quando a permissao ja foi dada'
+                }
+            }
             $modeloArq = ($modeloAtual.ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
             $destino = Join-Path $Amb.downloads ("kryptos-tela-$modeloArq-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.png')
             $remoto = '/sdcard/kryptos-tela.png'
