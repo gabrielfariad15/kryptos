@@ -303,10 +303,26 @@ try {
         Pausa 6500
 
         Write-Host '.. ciclo de vida: botao de inicio no meio das idas'
-        $r = Anunciar $a
-        $desdeA = $r.Desde
-        $p = Mandar $b 'acao=procurar phy=1M prioridade=PADRAO volta=NOTIFICACAO repeticoes=20 distancia=1'
-        if (-not (EsperarLinha $b 'MEDIDA sonda-ble ida ' $p.Desde 90)) { throw "a rodada do ciclo de vida nao chegou a primeira ida em 90 s no $(Nome $b)" }
+        # A rodada pode acabar antes da primeira ida por falha do Bluetooth (09/11/2026:
+        # CONEXAO_CAIU 133 logo depois do AMBOS). Isso e medida, nao defeito do roteiro:
+        # tenta de novo uma vez; se repetir, o ciclo de vida fica sem teste (AVISO).
+        $chegou = $false
+        $motivos = @()
+        for ($tentativa = 1; $tentativa -le 2 -and -not $chegou; $tentativa++) {
+            if ($tentativa -gt 1) { PararTodos @($a, $b); Pausa 6500 }
+            $r = Anunciar $a
+            $desdeA = $r.Desde
+            $p = Mandar $b 'acao=procurar phy=1M prioridade=PADRAO volta=NOTIFICACAO repeticoes=20 distancia=1'
+            $l = EsperarLinha $b "(MEDIDA sonda-ble ida |sonda-ble comando-fim id=$($p.Id) )" $p.Desde 90
+            if (-not $l) { throw "a rodada do ciclo de vida nao chegou a primeira ida nem terminou em 90 s no $(Nome $b)" }
+            if ($l -match 'comando-fim') { $motivos += "$(Campo $l 'desfecho') $(Campo $l 'codigo')".Trim() } else { $chegou = $true }
+        }
+    }
+    if ($Modo -eq 'UmMetro' -and -not $chegou) {
+        $resultados.Add("AVISO ciclo de vida sem teste: nas 2 tentativas a rodada acabou antes da primeira ida ($($motivos -join '; '))")
+        PararTodos @($a, $b)
+    }
+    if ($Modo -eq 'UmMetro' -and $chegou) {
         AdbS $b @('shell', 'input', 'keyevent', 'KEYCODE_HOME') | Out-Null
         $saiu = EsperarLinha $b 'FALHA sonda-ble APP_SAIU_DA_FRENTE' $p.Desde 20
         $caiu = EsperarLinha $a 'sonda-ble servidor evento=desconectou' $desdeA 30

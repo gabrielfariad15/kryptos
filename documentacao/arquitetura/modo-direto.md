@@ -304,11 +304,42 @@ Arquivo `kryptos-sonda-motorola-edge-40-neo-20261109-000333.txt`; 8 de 8 confer�
 
 Não mede nada do enlace: os caminhos de volta, a volta lenta e o alcance continuam esperando os dois celulares (`-Todos -SondaBle -Autonomo`, depois `-Alcance`).
 
+## Resultado de 09/11/2026, `-Autonomo` a 1 m (os três caminhos de volta)
+
+Arquivos `kryptos-sonda-*-20261109-003458.txt`, sem tocar na tela, os dois no Wi-Fi de casa, a 1 m.
+
+- **Calibração:** 6 de 6 OK, os três caminhos nos dois sentidos.
+- **Integridade:** fora da calibração, todas as idas e voltas que terminaram conferiram. Nenhum pedaço perdido.
+- **Volta, carta de 66.594 bytes, mediana de 5:**
+
+| Quem procura (conecta) | Rádio, prioridade | NOTIFICACAO | ESCRITA | L2CAP |
+|---|---|---|---|---|
+| g15 | 2M, alta | 6.035 ms | 6.111 ms | 4.282 ms |
+| Edge | 2M, alta | 549 ms | 557 ms | 491 ms |
+| g15 | 1M, padrão | 20.417 ms | — | — |
+| Edge | 1M, padrão | 1.167 ms | — | — |
+
+  A ida (quem procura escreve) ficou entre 595 e 766 ms em 2M alta, nos dois sentidos.
+
+**O que isso diz:**
+
+- **O lento é um sentido do enlace, não a API.** Com o g15 conectando, o Edge manda devagar pelos três caminhos; com o Edge conectando, os três são rápidos. A escrita do servidor (ESCRITA) não ganhou nada da notificação.
+- **A conta bate com um pacote do rádio por evento de conexão** (estimo, pela aritmética; o Android não mostra o intervalo):
+  - Pelo GATT, cada quadro de 512 bytes vira 519 com os cabeçalhos, ou 3 pacotes de até 251 bytes: 132 quadros dão 396 pacotes. 6,0 s / 396 = 15 ms, o intervalo da prioridade alta (11,25 a 15 ms). 20,4 s / 396 = 52 ms, perto do intervalo da padrão (30 a 50 ms).
+  - Pelo L2CAP, o fluxo enche os pacotes: uns 270 pacotes. 4,3 s / 270 = 16 ms, de novo um por evento. Por isso o L2CAP ganha 29% no sentido lento: só manda menos pacotes.
+  - No sentido rápido, cabem vários pacotes por evento.
+- **Quem limita, o Edge como periférico ou o g15 como central, não dá para separar com dois celulares.** Um terceiro aparelho separa.
+- **Primeira conexão de volta pela ESCRITA, nos dois sentidos:** ida e volta ficaram de 2 a 3 vezes mais lentas, como se o intervalo voltasse ao padrão. Nas rodadas seguintes, normal. Palpite: o Android reajusta os parâmetros do enlace quando o segundo cliente GATT conecta pela primeira vez.
+- **L2CAP:** abre em 51 a 81 ms do lado de quem anuncia e é o mais rápido nos dois sentidos (até 1.089 kbit/s).
+- **Coded, alta:** com o Edge conectando, 5 de 5 (ida 7,4 s, volta 2,6 s; a conexão levou 5,7 s). Com o g15 conectando, a volta esgotou os 30 s.
+- **AMBOS:** 2 de 3. Nas duas boas, o Edge ficou de cliente. Na terceira, os dois conectaram ao mesmo tempo (`duas_conexoes`). Cada servidor recusou a conexão do outro como "outro cliente", a notificação falhou com status 129 e as duas rodadas esgotaram o tempo. O desempate por espera aleatória não cobre a colisão.
+- **Ciclo de vida:** não testado nesta rodada. A procura logo depois do AMBOS caiu com 133 em 0,4 s, e o script esperou a primeira ida em vez de ver o fim. Defeito do script, corrigido no mesmo dia: agora reconhece o fim da rodada, tenta de novo uma vez e, se repetir, dá AVISO (`ciclo de vida sem teste`). Calibrado nos dois casos, 133 uma vez e 133 sempre.
+
 ## O que não resolve
 
 - **Presença:** quem procura BLE por perto vê que há um Kryptos ali (o identificador de serviço é fixo). Não vê quem é.
 - **Alcance:** ainda não medido (os celulares estavam juntos). Velocidade só a 1 m.
-- **Caminhos de volta:** construídos, sem nenhuma medida ainda. Não sei se o Android aceita o segundo cliente GATT no mesmo enlace, nem se a escrita do lado de quem anuncia escapa do custo fixo que pesa na notificação; se o lento for o próprio enlace aberto pelo g15, nenhum dos três resolve. Com dois celulares, continua sem dar para separar aparelho de papel.
+- **Caminhos de volta:** medidos a 1 m em 09/11/2026 (seção acima); em distância, não. O Android aceitou o segundo cliente GATT no mesmo enlace, mas a escrita não escapou do sentido lento, e o L2CAP só melhorou 29%. O sentido lento é do enlace aberto pelo g15: nenhum dos três resolve. Com dois celulares, continua sem dar para separar aparelho de papel.
 - **L2CAP sem pareamento:** o enlace não é cifrado (como o GATT da sonda). No Kryptos isso não expõe conteúdo, que vai cifrado pelo Olm, mas quem escuta o rádio vê o tamanho e a hora de cada carta.
 - **Distância declarada:** a sonda não mede distância. A trena é a referência, e o RSSI é só a leitura do sinal naquele lugar, não posição.
 - **Dois modelos só:** outro chip pode se comportar diferente, principalmente com os dois papéis ao mesmo tempo e com o Coded.
