@@ -80,11 +80,11 @@ Estas leis valem acima de qualquer decisão técnica, recomendação, regra de t
 - O que vale para o texto vale sem exceção: depois de lido, nada salvo (Lei 3).
 
 
-## Lei 10. Kryptos Empresa
+## Lei 10. Um app só, no Modelo Espião
 
-- Existe uma linha para empresas e órgãos, ao lado do Kryptos para pessoas.
-- O painel da empresa gerencia licenças, contatos internos e revogação de acesso, e nunca vê mensagem.
-- Tudo que vale para o Kryptos vale para o Kryptos Empresa. O painel não cria rastro de quem fala com quem.
+- Existe um único Kryptos, igual para todos e por todos os meios (internet, Bluetooth, rádio). Não há versão separada nem visual diferente por tipo de cliente.
+- Empresas e órgãos podem usar, mas no mesmo Modelo Espião: nada de registro, nada salvo, só texto.
+- Contato se adiciona de dois jeitos: pelo QR Code ou pelo código de contato.
 
 
 ## Lei 11. Código fechado
@@ -106,3 +106,4 @@ Decisões já tomadas que contrariam uma lei. Não seguir até o Gabriel decidir
 
 - 09/11/2026: versão 1. Motivo: recomendações que fugiam do que o Kryptos é fizeram o trabalho dar voltas. Exemplos: gravar as conversas no aparelho e pôr um número de cada celular no anúncio Bluetooth.
 - 09/11/2026: Leis 9 (só texto, nada salvo), 10 (Kryptos Empresa) e 11 (código fechado), decididas pelo Gabriel. Motivo da Lei 9: a mídia de visualização única do WhatsApp fica gravada na pasta do app.
+- 09/11/2026: Lei 10 reescrita pelo Gabriel. Sai a linha separada "Kryptos Empresa", com painel; entra um app só, no Modelo Espião, para pessoas e empresas, com contato por QR ou código.
