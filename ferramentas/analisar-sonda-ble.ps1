@@ -15,6 +15,7 @@
 # RESULTADO: OK so com os arquivos lidos e pelo menos uma calibracao OK e nenhuma
 # calibracao FALHOU: sem o conferidor calibrado, as medidas nao valem (regra 5.3).
 # Rodadas de calibracao (calibrar=sim) ficam fora das estatisticas de ida e volta.
+# Distancia com RSSI quase igual ao de 1 m sai como AVISO e fica fora do alcance.
 # As linhas tem so codigos e numeros (regra 8.2): nada a esconder ao colar a saida.
 
 [CmdletBinding()]
@@ -161,12 +162,38 @@ try {
         $resultados.Add("AVISO falha $($g.Name): $($g.Count)x ($onde)")
     }
 
+    # ---------- distancia declarada x sinal ----------
+    # A DISTANCIA e so uma etiqueta marcada na tela. Em 08/11/2026 as rodadas de 5 a 30 m
+    # foram feitas com os celulares juntos, e o RSSI ficou em -40 dBm em todas. Se o sinal
+    # numa distancia maior fica a menos de 6 dB do sinal a 1 m (estimo: de 1 para 5 m em
+    # espaco aberto cai uns 14 dB; dentro de casa varia uns 5 dB), a etiqueta e suspeita.
+    $comRssi = @($medidas | Where-Object { ($_.Evento -eq 'achou' -or $_.Evento -eq 'ida') -and $_.C.ContainsKey('rssi') -and $_.C.ContainsKey('distancia') -and $null -ne (Num $_.C['rssi']) })
+    # Cada aparelho le o sinal num nivel proprio (em 08/11 o Edge leu uns 12 dB abaixo do
+    # g15 na mesma distancia): a comparacao e de cada aparelho com o 1 m dele mesmo.
+    $suspeitas = @()
+    foreach ($ap in @($comRssi | Group-Object Aparelho)) {
+        $base = Mediana (Valores @($ap.Group | Where-Object { (Num $_.C['distancia']) -eq 1 }) 'rssi')
+        $maiores = @($ap.Group | Where-Object { (Num $_.C['distancia']) -gt 1 })
+        if ($maiores.Count -eq 0) { continue }
+        if ($null -eq $base) {
+            $resultados.Add("AVISO $($ap.Name) sem medida a 1 m: nao da para conferir se as distancias maiores foram reais")
+            continue
+        }
+        foreach ($g in @($maiores | Group-Object { [int](Num $_.C['distancia']) } | Sort-Object { [int]$_.Name })) {
+            $m = Mediana (Valores $g.Group 'rssi')
+            if ($m -ge $base - 6) {
+                if ($suspeitas -notcontains [int]$g.Name) { $suspeitas += [int]$g.Name }
+                $resultados.Add("AVISO distancia $($g.Name) m ($($ap.Name)): RSSI mediana $(F $m) dBm, quase igual a 1 m ($(F $base) dBm): os celulares estavam mesmo separados? O alcance a $($g.Name) m nao vale")
+            }
+        }
+    }
+
     # ---------- alcance por PHY ----------
     $ponta = @($medidas | Where-Object { $_.Evento -eq 'ida' -and $_.C['resultado'] -eq 'CONFERIU' })
     $naoAchou = @($falhas | Where-Object { $_.Evento -eq 'NAO_ACHOU_30S' })
     foreach ($phy in @('1M', '2M', 'CODED')) {
-        $d = @($ponta | Where-Object { $_.C['phy'] -eq $phy } | ForEach-Object { [int](Num $_.C['distancia']) })
-        $n = @($naoAchou | Where-Object { $_.C['phy'] -eq $phy } | ForEach-Object { [int](Num $_.C['distancia']) })
+        $d = @($ponta | Where-Object { $_.C['phy'] -eq $phy } | ForEach-Object { [int](Num $_.C['distancia']) } | Where-Object { $suspeitas -notcontains $_ })
+        $n = @($naoAchou | Where-Object { $_.C['phy'] -eq $phy } | ForEach-Object { [int](Num $_.C['distancia']) } | Where-Object { $suspeitas -notcontains $_ })
         if ($d.Count -eq 0 -and $n.Count -eq 0) { continue }
         $ate = if ($d.Count) { "conferiu ate $(($d | Measure-Object -Maximum).Maximum) m" } else { 'nenhuma ida conferida' }
         $sem = if ($n.Count) { "; nao achou a $((@($n | Sort-Object -Unique)) -join '/') m" } else { '' }

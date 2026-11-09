@@ -159,7 +159,7 @@ Roteiro (Edge = motorola edge 40 neo, g15 = moto g15):
    - 1M ALTA;
    - 2M ALTA;
    - CODED ALTA (se algum dos dois não tiver Coded, a linha diz; pule).
-5. Tire os cabos. Repita o passo 4 a 5 m e a 10 m: trena, linha reta, sem parede, e marque a DISTÂNCIA na tela.
+5. Tire os cabos. Repita o passo 4 a 5 m e a 10 m: trena, linha reta, sem parede, e marque a DISTÂNCIA na tela. **Os dois celulares têm de estar de fato separados por essa distância, cada um num ponto.** Trocar só a etiqueta na tela não mede nada (08/11/2026), e o analisador avisa quando o sinal não caiu.
 6. Alcance: com 1M PADRAO e com CODED ALTA, a 15, 20 e 30 m, até aparecer `NAO_ACHOU_30S` ou `CONEXAO_CAIU`.
 7. Papéis trocados, a 1 m: PARAR nos dois; g15 ANUNCIAR; Edge PROCURAR com 2M ALTA.
 8. Os dois papéis (segunda rodada), a 1 m: PARAR nos dois; nos dois, PHY 1M e AMBOS quase ao mesmo tempo. Espere `rodada-fim` ou uma FALHA e toque PARAR nos dois. Faça 3 vezes.
@@ -201,6 +201,29 @@ O que isso diz:
 - **Ciclo de vida:** o Edge saiu da frente às 14:34:49, e a sonda parou tudo, como desenhado.
 
 Faltam: 5, 10, 15, 20 e 30 m; mais tentativas de Coded; papéis trocados; os dois papéis ao mesmo tempo.
+
+## Resultado de 08/11/2026, noite (versão com a fila corrigida)
+
+Arquivos `kryptos-sonda-*-20261108-202820.txt`. **Todas as rodadas foram com os celulares juntos, a ~1 m.** A DISTÂNCIA marcada na tela (5 a 30 m) era só a etiqueta, confirmado pelo Gabriel. O RSSI mostrou isso: −35 a −45 dBm em todas as "distâncias". Então não há medida de alcance ainda. A partir de agora o `analisar-sonda-ble.ps1` avisa quando o sinal numa distância maior fica a menos de 6 dB do sinal a 1 m do mesmo aparelho, e tira essa distância do alcance.
+
+- **Fila corrigida:** nenhum `NOTIFICACAO_EM_ANDAMENTO` (eram 13 na tarde, com a versão antiga). Calibração: 7 de 7 OK, inclusive em Coded.
+- **A volta lenta depende de qual celular conecta.** Carta de 66.594 bytes, mediana:
+
+| Cliente (conecta) | Rádio, prioridade | Ida (cliente escreve) | Volta (o outro notifica) |
+|---|---|---|---|
+| g15 | 1M, padrão (tarde) | 2,4 s | 20,0 s |
+| g15 | Coded, alta (12 envios) | 7,3 s | 6,4 s |
+| Edge | 1M, padrão (5 envios) | 1,17 s | 1,14 s |
+| Edge | Coded, padrão (5 envios) | 5,4 s | 4,6 s |
+
+  - Com o Edge conectando, as duas direções andam juntas, ~460 kbit/s em 1M, prioridade padrão.
+  - Com o g15 conectando, o Edge notificando custa ~6,3 s com prioridade alta, seja 1M, 2M ou Coded: um custo fixo por notificação, não o rádio.
+  - Com dois celulares não dá para separar se o lento é o Edge notificar ou o g15 conectar: as duas coisas trocam juntas.
+- **Coded:** conectou em 7 de 9 tentativas do g15. O status 133 é intermitente (1 vez), não constante.
+- **Cada aparelho lê o RSSI num nível próprio:** na mesma situação, o Edge leu uns 12 dB abaixo do g15. Comparação de alcance só vale de um aparelho com ele mesmo.
+- **Os dois papéis ao mesmo tempo (AMBOS):** ainda não testado. Nas duas rodadas, só o Edge estava em AMBOS; o g15 estava anunciando. O Edge não confundiu a própria conexão com "o outro conectou primeiro".
+
+Faltam: alcance com os celulares separados de verdade, na trena, os dois fora do cabo; AMBOS com os dois tocando juntos; e as alternativas para a volta (escrita nos dois sentidos e canal L2CAP), se aprovadas.
 
 ## O que não resolve
 
