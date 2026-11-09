@@ -291,6 +291,19 @@ Arquivos `kryptos-sonda-*-20261108-202820.txt`. **Todas as rodadas foram com os 
 
 Faltam: alcance com os celulares separados de verdade, na trena, os dois fora do cabo; AMBOS com os dois tocando juntos; e as alternativas para a volta (escrita nos dois sentidos e canal L2CAP), aprovadas e construídas no mesmo dia (decisão 9, passo 10 do teste).
 
+## Resultado de 09/11/2026, `-Conferir` no Edge (um celular)
+
+Arquivo `kryptos-sonda-motorola-edge-40-neo-20261109-000333.txt`; 8 de 8 conferências OK, sem tocar na tela.
+
+- **Comando por arquivo:** chegou pelo `exec-in` (o `push` não foi preciso). Do comando gravado à linha `comando`: o intervalo de leitura de 250 ms mais o adb; de um comando ao próximo, uns 2 s, que é a espera do próprio script entre leituras.
+- **Permissão pelo `pm grant`:** as três concedidas, sem o aviso na tela. Com isso, a captura voltou a ser conferida: centro preto em 1.600 de 1.600 pontos, FLAG_SECURE valendo também na sonda.
+- **L2CAP:** a escuta abriu sem pareamento, PSM 128 (0x80, o primeiro da faixa dinâmica do BLE).
+- **Anúncio:** legado e Coded, os dois com −3 dBm em potência alta (o mesmo de 08/11).
+- **Procura sem o outro celular:** `NAO_ACHOU_30S` em 30,07 s, sem localização, e o fim marcado.
+- **Fora da frente:** com o botão de início, o comando foi recusado (`COMANDO_FORA_DA_FRENTE`); de volta à frente, aceito.
+
+Não mede nada do enlace: os caminhos de volta, a volta lenta e o alcance continuam esperando os dois celulares (`-Todos -SondaBle -Autonomo`, depois `-Alcance`).
+
 ## O que não resolve
 
 - **Presença:** quem procura BLE por perto vê que há um Kryptos ali (o identificador de serviço é fixo). Não vê quem é.
