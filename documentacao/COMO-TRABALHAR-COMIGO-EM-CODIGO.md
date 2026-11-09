@@ -2,7 +2,9 @@
 
 Regras para as sessões técnicas do Kryptos, para o Claude e para quem mais mexer no repositório. Cada regra nasceu de um erro real e existe para errar menos e gastar menos, não para travar o trabalho.
 
-Duas cláusulas valem acima de todas:
+Acima destas regras e de qualquer decisão estão as **Leis do Kryptos** (`documentacao/LEIS-DO-KRYPTOS.md`). Toda recomendação é conferida contra elas antes de ser feita e traz a linha "Leis conferidas:". Solução que fere uma lei é descartada; se nenhum caminho cumpre todas, o Claude para e pergunta.
+
+Duas cláusulas valem acima de todas as regras deste documento:
 
 - **Se eu disser "regra 4.2" (ou qualquer número), pare na hora.** Diga o que foi feito fora da regra e corrija antes de seguir.
 - **Se uma regra atrapalhar mais do que ajuda numa situação, diga qual e por quê, e siga.** A exceção fica registrada na conversa. Regra que vive sendo exceção sai do documento (seção 11).
@@ -156,3 +158,4 @@ O Claude responde primeiro com o que entendeu, o levantamento curto (2.3) se cou
 - 07/11/2026: versão do Rust fixada no `rust-toolchain.toml` (regra 5.6) e conferida pelo `conferir-rust.ps1`, chamado pela suíte e pelo `instalar-no-celular.ps1`. Motivo: o clippy 1.98 da máquina do Gabriel acusou um lint que o 1.97 do Claude não tinha, e o Cargokit compila o celular com a `stable` sem ler o `rust-toolchain.toml`.
 - 07/11/2026: regra 4.3 ganha o `& { ... }`. Motivo: colado no console, cada linha do bloco rodava sozinha, e um `RESULTADO: OK` saiu depois de uma suíte que falhou. Nos blocos de commit, um `throw` na conferência não teria impedido o `git add` nem o `git commit` da linha seguinte. Versão do Rust de 1.98.0 para 1.98.1, que corrige código gerado errado; a conferência nova pegou a diferença na primeira rodada.
 - 08/11/2026: a suíte passa a compilar o Kotlin do Android (debug, profile e release) sem celular, com aviso do nosso código valendo erro. Motivo: antes o Kotlin só compilava com `-Aparelho`, e a sonda BLE trouxe Kotlin novo em três variantes. Medido aqui: de 15 a 25 s com o Gradle já baixado, e 92 s dentro da suíte. O compilador Kotlin 2.4 deste projeto não avisa sobre variável sem uso: o passo barra só o que o compilador emite. Ferramenta nova `analisar-sonda-ble.ps1`; `instalar-no-celular.ps1` ganha `-SondaBle` e `-LerSonda`.
+- 09/11/2026: as Leis do Kryptos passam a valer acima destas regras, com a linha "Leis conferidas:" em toda recomendação. Motivo: recomendações que fugiam do que o Kryptos é fizeram o trabalho dar voltas.
