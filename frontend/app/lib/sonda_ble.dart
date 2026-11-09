@@ -48,6 +48,9 @@ class _TelaSondaBleState extends State<TelaSondaBle> {
   String? _erro;
   String _phy = '1M';
   String _prioridade = 'PADRAO';
+  // Caminho da volta (servidor -> cliente): NOTIFICACAO, ESCRITA (servidor escreve no
+  // cliente pelo mesmo enlace) ou L2CAP. Quem escolhe é o celular que procura.
+  String _volta = 'NOTIFICACAO';
   int _distancia = 1;
   final _linhas = <String>[];
 
@@ -104,6 +107,7 @@ class _TelaSondaBleState extends State<TelaSondaBle> {
     'phy': _phy,
     'prioridade': _prioridade,
     'distancia': _distancia,
+    'volta': _volta,
     'repeticoes': calibrar ? 3 : 5,
     'calibrar': calibrar,
   };
@@ -163,6 +167,13 @@ class _TelaSondaBleState extends State<TelaSondaBle> {
                 ['PADRAO', 'ALTA'],
                 _prioridade,
                 (v) => _prioridade = v,
+              ),
+              _escolha(
+                'volta',
+                'VOLTA',
+                ['NOTIFICACAO', 'ESCRITA', 'L2CAP'],
+                _volta,
+                (v) => _volta = v,
               ),
               _escolha(
                 'distancia',

@@ -1,5 +1,10 @@
 package com.torionsystems.kryptos
 
+import java.io.DataInputStream
+import java.io.EOFException
+import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.security.MessageDigest
 
 /**
@@ -16,21 +21,61 @@ import java.security.MessageDigest
  *   INICIO      = 1 | n (1) | total (4) | pedaços (2) | tamanho do pedaço (2) | SHA-256 (32)
  *   PEDACO      = 2 | índice (2) | dados
  *   RESULTADO   = 3 | n (1) | código (1) | recebidos (2) | primeiro faltando (2) | ms do receptor (4)
- *   PEDIR_VOLTA = 4 | n (1) | sabotagem (1)
+ *   PEDIR_VOLTA = 4 | n (1) | sabotagem (1) | caminho (1)
+ *   PREPARAR    = 5 | caminho (1)
+ *   PRONTO      = 6 | caminho (1) | código (1) | PSM (2)
  *
  * Inteiros em big-endian.
+ *
+ * Caminho de volta (servidor -> cliente), escolhido pelo cliente:
+ *   NOTIFICACAO  o servidor notifica (o de sempre);
+ *   ESCRITA      o servidor vira cliente GATT do cliente, no mesmo enlace, e escreve sem
+ *                resposta (os papéis GATT não dependem de quem conectou);
+ *   L2CAP        canal L2CAP orientado a conexão (CoC); o PSM vai no PRONTO.
+ * Os quadros de controle (INICIO e RESULTADO da ida, PREPARAR, PRONTO, PEDIR_VOLTA) vão
+ * sempre pelo GATT de sempre; só o INICIO e os pedaços da volta mudam de caminho.
+ *
+ * No L2CAP o canal é um fluxo de bytes: cada quadro vai numa moldura = tamanho (2) | quadro.
  */
 object QuadroSonda {
     const val MAX_VALOR_ATRIBUTO = 512
     const val CABECALHO_PEDACO = 3
     const val TAMANHO_INICIO = 42
     const val TAMANHO_RESULTADO = 11
-    const val TAMANHO_PEDIR_VOLTA = 3
+    const val TAMANHO_PEDIR_VOLTA = 4
+    const val TAMANHO_PREPARAR = 2
+    const val TAMANHO_PRONTO = 5
 
     const val TIPO_INICIO: Byte = 1
     const val TIPO_PEDACO: Byte = 2
     const val TIPO_RESULTADO: Byte = 3
     const val TIPO_PEDIR_VOLTA: Byte = 4
+    const val TIPO_PREPARAR: Byte = 5
+    const val TIPO_PRONTO: Byte = 6
+
+    // Caminho de volta.
+    const val CAMINHO_NOTIFICACAO = 0
+    const val CAMINHO_ESCRITA = 1
+    const val CAMINHO_L2CAP = 2
+
+    fun nomeDoCaminho(c: Int): String = when (c) {
+        CAMINHO_NOTIFICACAO -> "NOTIFICACAO"
+        CAMINHO_ESCRITA -> "ESCRITA"
+        CAMINHO_L2CAP -> "L2CAP"
+        else -> "CAMINHO_$c"
+    }
+
+    fun caminhoDoNome(nome: String): Int? = when (nome) {
+        "NOTIFICACAO" -> CAMINHO_NOTIFICACAO
+        "ESCRITA" -> CAMINHO_ESCRITA
+        "L2CAP" -> CAMINHO_L2CAP
+        else -> null
+    }
+
+    // Código do PRONTO.
+    const val PRONTO_OK = 0
+    const val PRONTO_SEM_SUPORTE = 1
+    const val PRONTO_FALHOU = 2
 
     // Sabotagem: só para calibrar quem confere (regra 5.3).
     const val SABOTAGEM_NENHUMA = 0
@@ -70,7 +115,9 @@ object QuadroSonda {
 
     class Resultado(val n: Int, val codigo: Int, val recebidos: Int, val primeiroFaltando: Int, val msReceptor: Long)
 
-    class PedirVolta(val n: Int, val sabotagem: Int)
+    class PedirVolta(val n: Int, val sabotagem: Int, val caminho: Int)
+
+    class Pronto(val caminho: Int, val codigo: Int, val psm: Int)
 
     // ---------- montar ----------
 
@@ -122,8 +169,20 @@ object QuadroSonda {
         return b
     }
 
-    fun pedirVolta(n: Int, sabotagem: Int): ByteArray =
-        byteArrayOf(TIPO_PEDIR_VOLTA, n.toByte(), sabotagem.toByte())
+    fun pedirVolta(n: Int, sabotagem: Int, caminho: Int = CAMINHO_NOTIFICACAO): ByteArray =
+        byteArrayOf(TIPO_PEDIR_VOLTA, n.toByte(), sabotagem.toByte(), caminho.toByte())
+
+    fun preparar(caminho: Int): ByteArray = byteArrayOf(TIPO_PREPARAR, caminho.toByte())
+
+    fun pronto(caminho: Int, codigo: Int, psm: Int = 0): ByteArray {
+        require(psm in 0..0xFFFF)
+        val b = ByteArray(TAMANHO_PRONTO)
+        b[0] = TIPO_PRONTO
+        b[1] = caminho.toByte()
+        b[2] = codigo.toByte()
+        poe16(b, 3, psm)
+        return b
+    }
 
     // ---------- ler (null = fora do formato) ----------
 
@@ -149,7 +208,50 @@ object QuadroSonda {
         if (b.size != TAMANHO_PEDIR_VOLTA || b[0] != TIPO_PEDIR_VOLTA) return null
         val s = b[2].toInt() and 0xFF
         if (s > SABOTAGEM_PULAR_PEDACO) return null
-        return PedirVolta(b[1].toInt() and 0xFF, s)
+        val c = b[3].toInt() and 0xFF
+        if (c > CAMINHO_L2CAP) return null
+        return PedirVolta(b[1].toInt() and 0xFF, s, c)
+    }
+
+    /** O caminho pedido, ou null. */
+    fun lerPreparar(b: ByteArray): Int? {
+        if (b.size != TAMANHO_PREPARAR || b[0] != TIPO_PREPARAR) return null
+        val c = b[1].toInt() and 0xFF
+        return if (c in CAMINHO_ESCRITA..CAMINHO_L2CAP) c else null
+    }
+
+    fun lerPronto(b: ByteArray): Pronto? {
+        if (b.size != TAMANHO_PRONTO || b[0] != TIPO_PRONTO) return null
+        val c = b[1].toInt() and 0xFF
+        val codigo = b[2].toInt() and 0xFF
+        if (c !in CAMINHO_ESCRITA..CAMINHO_L2CAP || codigo > PRONTO_FALHOU) return null
+        return Pronto(c, codigo, le16(b, 3))
+    }
+
+    // ---------- moldura do L2CAP ----------
+
+    /** Escreve tamanho (2) | quadro. Não faz flush. */
+    fun escreverMoldura(saida: OutputStream, q: ByteArray) {
+        require(q.isNotEmpty() && q.size <= MAX_VALOR_ATRIBUTO)
+        saida.write(byteArrayOf((q.size ushr 8).toByte(), q.size.toByte()))
+        saida.write(q)
+    }
+
+    /**
+     * Lê uma moldura. null = o outro lado fechou entre duas molduras. Moldura cortada no
+     * meio, vazia ou maior que 512 bytes: IOException (quem lê fecha o canal; o tamanho
+     * nunca vira alocação grande).
+     */
+    fun lerMoldura(entrada: InputStream): ByteArray? {
+        val a = entrada.read()
+        if (a < 0) return null
+        val b = entrada.read()
+        if (b < 0) throw EOFException("moldura cortada no tamanho")
+        val n = (a shl 8) or b
+        if (n == 0 || n > MAX_VALOR_ATRIBUTO) throw IOException("moldura com tamanho $n")
+        val q = ByteArray(n)
+        DataInputStream(entrada).readFully(q) // EOFException se cortar no meio
+        return q
     }
 
     /**
@@ -157,8 +259,8 @@ object QuadroSonda {
      * último pedaço, quando todos chegaram ou quando um pedaço vem fora do formato; antes
      * disso, null. Depois do resultado, ignora o que chegar.
      *
-     * O GATT entrega em ordem numa mesma conexão; o último pedaço chegando com falta de
-     * algum antes dele quer dizer pedaço perdido.
+     * O GATT entrega em ordem numa mesma conexão, e o L2CAP também; o último pedaço
+     * chegando com falta de algum antes dele quer dizer pedaço perdido.
      */
     class Remontagem(val inicio: Inicio, private val agoraMs: () -> Long) {
         private val dados = ByteArray(inicio.total)

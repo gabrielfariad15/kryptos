@@ -18,6 +18,26 @@ Decidido em 08/11/2026. Exigência de origem: `DECISOES-FASE-0.md` (seção 8) e
    - **Rádio fora do Bluetooth e do Wi-Fi:** só com hardware extra, como o LoRa já previsto (`DECISOES-FASE-0.md`, seção 8).
 8. **Medidas fora do cabo:** a sonda grava as linhas MEDIDA num arquivo da pasta privada do app, e o script lê no fim pelo `run-as`, que só funciona em app de debug. A depuração sem fio ficou de fora, porque exige o Wi-Fi ligado, e o Wi-Fi divide os 2,4 GHz com o Bluetooth.
 
+## Decisões de 08/11/2026, terceira parte
+
+9. **A sonda mede três caminhos para a volta.** A volta lenta (seção "Resultado de 08/11/2026, noite") vem de um custo fixo por notificação, não do rádio. Antes de escolher o caminho do passo 2, a sonda mede as alternativas lado a lado, com a variável VOLTA:
+   - `NOTIFICACAO`: o servidor notifica (o de sempre);
+   - `ESCRITA`: o servidor vira cliente GATT do cliente, pelo mesmo enlace, e escreve sem resposta, com o mesmo controle de fluxo da ida. Os papéis GATT (quem serve e quem pede) não dependem de quem conectou (Nordic, NXP);
+   - `L2CAP`: canal L2CAP orientado a conexão (CoC, API 29+), sem pareamento, num PSM dinâmico que o servidor entrega pelo GATT.
+   O caminho que ganhar entra no passo 2. Pode ser um por direção, ou um por par de aparelhos.
+10. **Cubo: escolha automática do meio** (etapa própria, depois do passo 2). O Cubo deixa de estimar distância e passa a medir a **qualidade do enlace**:
+    - Entradas: RSSI, perda de pedaço, tempo medido de cada transferência e, quando houver LoRa, a relação sinal-ruído (SNR).
+    - O que escolhe: o meio (BLE 2M, BLE Coded, LoRa ou internet), quem conecta e qual caminho de volta, o ajuste do LoRa (alcance contra velocidade) e, numa malha, o repetidor.
+    - Medida errada: filtro de Kalman para suavizar e RANSAC para descartar o ponto fora da curva, como na biblioteca Python do Cubo.
+    - **Em Rust, no núcleo** (decisão 6): o mesmo código no Android, no iPhone, nos computadores e no rádio, e passa pela suíte. A biblioteca Python fica como referência; Python não vai para o celular.
+    - **Não estima posição nem distância.** O Kryptos não deriva localização do Bluetooth, do Wi-Fi nem do som. É o que mantém verdadeiro o `neverForLocation` do `BLUETOOTH_SCAN`.
+11. **Modo Local, opcional e desligado por padrão.** A mensagem só abre num raio definido (`DECISOES-FASE-0.md`, seção 8), se a pessoa ligar:
+    - a permissão de localização é pedida em tempo de execução só quando a pessoa liga o Local, nunca na instalação nem no primeiro uso;
+    - a distância vem só do GPS do próprio aparelho, nunca do Bluetooth, do Wi-Fi ou do som (decisão 10);
+    - a coordenada não sai do aparelho;
+    - nunca em segundo plano: `ACCESS_BACKGROUND_LOCATION` continua proibida.
+    Hoje o `instalar-no-celular.ps1` recusa o app que tenha qualquer permissão de localização. Quando o Local for construído, essa conferência muda para: localização declarada só com o Local, não concedida na instalação, e a de segundo plano continua recusada.
+
 ## O que a pesquisa mostrou (08/11/2026)
 
 - **bitchat** (malha BLE, Android e iPhone): cada aparelho age nos dois papéis, e a mensagem grande vai em pedaços. A Trail of Bits considerou legítimas as falhas apontadas logo no lançamento (julho de 2025), e uma auditoria posterior achou injeção de mensagem não autenticada na malha (corrigida em 28/01/2026). Lição para o Kryptos: o transporte não autentica nada; quem decide se a carta vale é o núcleo, pelo Olm.
@@ -41,13 +61,19 @@ Achados do passo 1, antes do código (08/11/2026):
 - **Velocidade:** depende do intervalo de conexão (prioridade alta: 11,25 a 15 ms) e do PHY. Referência da Silicon Labs, Android para periférico, intervalo de 15 ms: 610 kbit/s em 2M e 215 kbit/s em 1M. Entre dois celulares, estimo de 1 a 3 s para 66.594 bytes; a sonda mede. O Android não mostra o intervalo de conexão na API pública.
 - **O Android avisa o servidor GATT também da conexão que o próprio aparelho abriu como cliente.** No modo AMBOS, a sonda compara com o aparelho que procurou (sem gravar o endereço) para não confundir com "o outro conectou primeiro".
 
+Achados para os caminhos de volta (08/11/2026, decisão 9):
+
+- **L2CAP CoC no Android:** o servidor chama `listenUsingInsecureL2capChannel()`, que dá um PSM dinâmico (`getPsm()`); o cliente chama `createInsecureL2capChannel(psm)` e `connect()`. API 29 ou mais nova. O `connect()` e o `accept()` bloqueiam, então rodam em thread própria. "Insecure" é sem pareamento, como o GATT da sonda; o conteúdo do Kryptos já vai cifrado pelo Olm.
+- **O canal L2CAP é um fluxo de bytes** para quem lê: não preserva a fronteira de cada escrita. A sonda põe cada quadro numa moldura com o tamanho na frente (2 bytes), e a leitura recusa moldura vazia ou maior que 512 bytes.
+- **GATT nos dois sentidos:** um aparelho pode ser servidor e cliente GATT do outro ao mesmo tempo, no mesmo enlace. O MTU é do enlace; o pedido de MTU do segundo cliente pode não ter resposta, e aí a sonda usa o MTU que o servidor já conhece (`mtu_origem=herdado`). Que o Android aceite abrir esse segundo cliente no mesmo enlace é o que a sonda vai mostrar: não achei medida publicada entre dois celulares.
+
 Fontes: developer.android.com (permissões do Bluetooth, tipos de serviço em primeiro plano, Wi-Fi Direct, mudanças do Android 14); developer.apple.com (`CBPeripheralManager.startAdvertising`); blog.trailofbits.com (18/07/2025); code.briarproject.org (public-mesh-research, issue 5); devzone.nordicsemi.com (L2CAP e GATT; MTU 517 no Android 14).
 
 ## Regras do transporte BLE
 
 - **Entrega a carta inteira ou nada** (`transportes.md`). Divide em pedaços e remonta; quem confere se a carta vale é o núcleo, pelo `receber_carta`.
 - **O anúncio não diz quem é.** Anuncia só que é um Kryptos (um identificador de serviço fixo). Quem é quem só se revela dentro da conexão, com desenho próprio antes do código (passo 3).
-- **Sem localização.** `neverForLocation`; o Kryptos não deriva posição do Bluetooth. O Cubo (estimar distância) é outra etapa e terá decisão própria sobre isso.
+- **Sem localização.** `neverForLocation`; o Kryptos não deriva posição nem distância do Bluetooth (decisões 10 e 11). O Cubo usa o sinal só para escolher o meio.
 - **Nada de conteúdo em log** (regra 8.2): só códigos e medidas.
 
 ## Sugestão de 08/11/2026: código Morse ou linguagem nova de criptografia
@@ -83,7 +109,7 @@ Só existe no app de debug, montado com `--dart-define=KRYPTOS_SONDA_BLE=true`. 
 | `frontend/app/android/app/src/debug/AndroidManifest.xml` | `BLUETOOTH_SCAN` com `neverForLocation`, `BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT`; nada de localização |
 | `frontend/app/lib/sonda_ble.dart` | Tela: papel, variáveis, linhas |
 | `ferramentas/instalar-no-celular.ps1 -SondaBle` / `-LerSonda` | Monta, confere, instala, zera, espera FIM, traz as medidas e analisa |
-| `ferramentas/analisar-sonda-ble.ps1` | Resumo das medidas, por distância, PHY e prioridade |
+| `ferramentas/analisar-sonda-ble.ps1` | Resumo das medidas, por distância, PHY, prioridade e caminho de volta |
 
 Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige Android 13 ou mais novo (as chamadas de escrita e notificação que devolvem código); os dois celulares de teste são Android 15.
 
@@ -92,13 +118,16 @@ Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige And
 - **ANUNCIAR (servidor):** abre o serviço e anuncia em dois conjuntos, o legado (1M, o que qualquer aparelho vê) e o de longo alcance (Coded), se o aparelho tiver. O anúncio leva só o UUID do serviço, com potência alta.
 - **PROCURAR (cliente):** procura, conecta, pede MTU 517 uma vez, ajusta PHY e prioridade, liga a notificação e faz 5 idas e 5 voltas da carta de 66.594 bytes aleatórios.
   - Ida: o cliente escreve sem resposta; o servidor confere o SHA-256 e responde.
-  - Volta: o servidor notifica; o cliente confere.
+  - Volta: o servidor manda pelo caminho escolhido em VOLTA (decisão 9); o cliente confere. Com ESCRITA ou L2CAP, antes da primeira ida o cliente pede `PREPARAR` e espera o `PRONTO`:
+    - ESCRITA: o cliente abre um serviço GATT próprio (não anunciado), e o servidor conecta nele pelo mesmo enlace;
+    - L2CAP: o servidor abre a escuta e manda o PSM no `PRONTO`; o cliente conecta o canal.
+  - Os quadros de controle (resultado da ida, `PREPARAR`, `PRONTO`, pedido da volta) vão sempre pelo GATT de sempre. Só a carta da volta muda de caminho, com o mesmo pedaço de 509 bytes nos três: o que vai no ar são pacotes de até 251 bytes em qualquer caso.
 - **CALIBRAR:** como o PROCURAR, com 3 idas e voltas: na 1ª um byte trocado, na 2ª um pedaço a menos, na 3ª nada. Esperado: `SHA_NAO_CONFERE`, `PEDACO_FALTANDO` e `CONFERIU`, nos dois sentidos. Sem calibração OK, a análise dá FALHA (regra 5.3).
 - **AMBOS (segunda rodada):** os dois papéis ao mesmo tempo; o desempate é uma espera aleatória de até 1,5 s antes de conectar, sem nenhum dado a mais no anúncio.
 - **Ciclo de vida:** a tela fica acesa enquanto a sonda está aberta. Se o app sai da frente, a sonda para tudo (`APP_SAIU_DA_FRENTE`).
 - **ENVIAR MEDIDAS:** abre o "Compartilhar" do Android com o arquivo de medidas inteiro, em texto (WhatsApp, e-mail, copiar). Só com a sonda parada, porque abrir a escolha tira o app da frente. Até 400 KB; acima disso, use o `-LerSonda`. Sem medidas, a tela mostra `ERRO SEM_MEDIDAS`.
 
-**Variáveis**, escolhidas na tela, uma por rodada: PHY (1M, 2M, CODED), prioridade (PADRAO, ALTA) e a distância declarada (1, 5, 10, 15, 20, 30 m).
+**Variáveis**, escolhidas na tela, uma por rodada: PHY (1M, 2M, CODED), prioridade (PADRAO, ALTA), caminho de volta (NOTIFICACAO, ESCRITA, L2CAP) e a distância declarada (1, 5, 10, 15, 20, 30 m). Quem escolhe é o celular que procura.
 
 **Linhas.** O formato é `<hora> MEDIDA sonda-ble <evento> chave=valor ...` e `<hora> FALHA sonda-ble <CODIGO> ...`. Elas vão para o logcat (tag `KryptosSonda`), para a tela e para `files/sonda-ble.txt`, na pasta privada do app (no máximo 2 MiB). Só códigos e números: nem o endereço Bluetooth do outro aparelho.
 
@@ -106,13 +135,17 @@ Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige And
 |---|---|
 | `aparelho` | modelo, android, api, le2m, coded, anuncio_estendido, anuncio_max_bytes, anuncios_multiplos, wifi_aware, wifi_direct, nfc, uwb |
 | `anuncio` | tipo (legado, coded), resultado, tx_dbm |
-| `achou` | rodada, distancia, phy, prioridade, calibrar, phy_anuncio, rssi, ms |
+| `achou` | rodada, distancia, phy, prioridade, volta, calibrar, phy_anuncio, rssi, ms |
 | `conexao` | ms, mtu, pedaco, pedacos, phy_tx, phy_rx |
+| `volta-pronta` | (cliente) ms para abrir o caminho ESCRITA ou L2CAP; tx_max e rx_max no L2CAP |
+| `servidor-volta` | (servidor) caminho, ms; mtu e mtu_origem na ESCRITA; tx_max e rx_max no L2CAP |
 | `ida`, `volta` | n, bytes, pedacos, ms, kbps, resultado, recebidos, ms_receptor, ocupado, rssi (só na ida) |
-| `servidor-recebeu`, `servidor-enviou` | o mesmo, do lado do servidor |
-| `rodada-fim`, `calibracao`, `ambos`, `parou` | o desfecho de cada rodada |
+| `servidor-recebeu`, `servidor-enviou` | o mesmo, do lado do servidor; `servidor-enviou` leva o caminho (no L2CAP, ocupado e mtu saem `-`) |
+| `rodada-fim`, `calibracao`, `ambos`, `parou` | o desfecho de cada rodada; `calibracao` leva volta (o caminho) e as listas ida e voltas |
 
 Códigos de FALHA: `ANDROID_ANTIGO`, `SEM_PERMISSAO`, `SEM_BLUETOOTH`, `BLUETOOTH_DESLIGADO`, `PROCURA_DEMAIS`, `NAO_ACHOU_30S`, `CONEXAO_CAIU` (com o status), `TEMPO_ESGOTADO` (com a etapa), `MTU`, `ESCRITA*`, `NOTIFICACAO*`, `ANUNCIO_LEGADO`, `ANUNCIO_CODED`, `QUADRO_INVALIDO`, `APP_SAIU_DA_FRENTE`, `PARADA_PEDIDA`.
+
+Dos caminhos de volta: `VOLTA_PREPARAR` (com o motivo, do lado do servidor), `VOLTA_NAO_PREPARADA`, `VOLTA_CAIU`, `SERVIDOR_VOLTA_NAO_ABRIU`, `SERVICO_VOLTA_RECUSADO`, `L2CAP_CONEXAO`, `L2CAP_CAIU`, `L2CAP_ESCRITA`.
 
 **Como foi provado antes do celular (08/11/2026):**
 
@@ -131,6 +164,10 @@ Códigos de FALHA: `ANDROID_ANTIGO`, `SEM_PERMISSAO`, `SEM_BLUETOOTH`, `BLUETOOT
 
   O `-LerSonda` não instala, não zera e não compila. A captura de tela não roda no Linux (System.Drawing só existe no Windows) e ficou fora dessa calibração.
 - Kotlin das três variantes compilado, e a suíte agora compila sempre (passo "kotlin do Android").
+- **Caminhos de volta (08/11/2026, decisão 9):**
+  - `QuadroSonda.kt`: 53 casos fora do Android (eram 33). Os novos cobrem `PREPARAR`, `PRONTO` com PSM até 65.535, o pedido da volta com o caminho, e a carta inteira passando em molduras por um fluxo que entrega no máximo 7 bytes por leitura, como um canal picotado. Duas sabotagens, cada uma pegou: sem recusar caminho desconhecido e sem recusar moldura vazia ou maior que 512 bytes.
+  - Tela: os testes conferem que a VOLTA escolhida vai para o Android; sem o campo, dois falham.
+  - `analisar-sonda-ble.ps1`: separa ida e volta pelo caminho e exige uma calibração OK para cada caminho medido. Pegou: L2CAP e ESCRITA medidos só com calibração de notificação, e calibração da ESCRITA que falhou. Os arquivos de antes (sem o campo) continuam dando o mesmo resultado, como NOTIFICACAO.
 
 - **Defeito que o celular achou e a calibração deixou passar (08/11/2026):** a conferência do arquivo zerado usava `run-as ... sh -c "if ...; then ...; fi"`. O `adb shell` junta os argumentos numa linha só, e o shell do celular lê essa linha de novo: o `;` quebrou o comando (`syntax error: unexpected 'then'`). O `adb` falso da calibração executava os argumentos direto, sem essa segunda leitura. Agora a conferência é um `ls` de um arquivo só, sem nada para o shell interpretar, e o `adb` falso imita a segunda leitura: com ele, o script anterior falha do mesmo jeito que no celular, e o corrigido passa. Casos errados: arquivo que não apagou, `run-as` que falha e resposta inesperada do `ls`. Nenhum outro `adb shell` do script tem caractere que o shell reinterprete.
 
@@ -164,7 +201,12 @@ Roteiro (Edge = motorola edge 40 neo, g15 = moto g15):
 7. Papéis trocados, a 1 m: PARAR nos dois; g15 ANUNCIAR; Edge PROCURAR com 2M ALTA.
 8. Os dois papéis (segunda rodada), a 1 m: PARAR nos dois; nos dois, PHY 1M e AMBOS quase ao mesmo tempo. Espere `rodada-fim` ou uma FALHA e toque PARAR nos dois. Faça 3 vezes.
 9. Ciclo de vida: Edge ANUNCIAR; g15 PROCURAR com 1M PADRAO. Durante as idas, aperte o botão de início no g15. Esperado: `FALHA ... APP_SAIU_DA_FRENTE` no g15 e `servidor evento=desconectou` no Edge. Volte ao app.
-10. Ligue os dois de volta no cabo e só então digite FIM.
+10. Caminhos de volta, a 1 m (decisão 9). Edge ANUNCIAR; no g15, 2M ALTA:
+    - VOLTA ESCRITA, CALIBRAR; depois PROCURAR;
+    - VOLTA L2CAP, CALIBRAR; depois PROCURAR;
+    - VOLTA NOTIFICACAO, PROCURAR (para comparar no mesmo momento).
+    Depois, PARAR nos dois, g15 ANUNCIAR e repetir os três PROCURAR no Edge. Sem calibração do caminho, a análise dá FALHA.
+11. Ligue os dois de volta no cabo e só então digite FIM.
 
 O script traz os dois arquivos de medidas para Downloads, num zip `kryptos-sonda-<data>.zip`, e roda a análise. Cole as linhas de saída e anexe o zip.
 
@@ -223,12 +265,14 @@ Arquivos `kryptos-sonda-*-20261108-202820.txt`. **Todas as rodadas foram com os 
 - **Cada aparelho lê o RSSI num nível próprio:** na mesma situação, o Edge leu uns 12 dB abaixo do g15. Comparação de alcance só vale de um aparelho com ele mesmo.
 - **Os dois papéis ao mesmo tempo (AMBOS):** ainda não testado. Nas duas rodadas, só o Edge estava em AMBOS; o g15 estava anunciando. O Edge não confundiu a própria conexão com "o outro conectou primeiro".
 
-Faltam: alcance com os celulares separados de verdade, na trena, os dois fora do cabo; AMBOS com os dois tocando juntos; e as alternativas para a volta (escrita nos dois sentidos e canal L2CAP), se aprovadas.
+Faltam: alcance com os celulares separados de verdade, na trena, os dois fora do cabo; AMBOS com os dois tocando juntos; e as alternativas para a volta (escrita nos dois sentidos e canal L2CAP), aprovadas e construídas no mesmo dia (decisão 9, passo 10 do teste).
 
 ## O que não resolve
 
 - **Presença:** quem procura BLE por perto vê que há um Kryptos ali (o identificador de serviço é fixo). Não vê quem é.
-- **Alcance e velocidade:** ainda não medidos. A sonda está pronta; falta o teste nos celulares.
+- **Alcance:** ainda não medido (os celulares estavam juntos). Velocidade só a 1 m.
+- **Caminhos de volta:** construídos, sem nenhuma medida ainda. Não sei se o Android aceita o segundo cliente GATT no mesmo enlace, nem se a escrita do lado de quem anuncia escapa do custo fixo que pesa na notificação; se o lento for o próprio enlace aberto pelo g15, nenhum dos três resolve. Com dois celulares, continua sem dar para separar aparelho de papel.
+- **L2CAP sem pareamento:** o enlace não é cifrado (como o GATT da sonda). No Kryptos isso não expõe conteúdo, que vai cifrado pelo Olm, mas quem escuta o rádio vê o tamanho e a hora de cada carta.
 - **Distância declarada:** a sonda não mede distância. A trena é a referência, e o RSSI é só a leitura do sinal naquele lugar, não posição.
 - **Dois modelos só:** outro chip pode se comportar diferente, principalmente com os dois papéis ao mesmo tempo e com o Coded.
 - **Wi-Fi ligado ou desligado** muda o Bluetooth (2,4 GHz). O script registra o estado, mas não controla.

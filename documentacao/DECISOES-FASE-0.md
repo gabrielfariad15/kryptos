@@ -82,11 +82,11 @@ Telas de apoio aprovadas: novo contato (QR, código, som), criar grupo, configur
 ## 8. Conexões
 
 - **Internet:** opção de roteamento em camadas (3 servidores, nenhum sabe origem e destino ao mesmo tempo) para esconder o IP. Mais lento.
-- **Perto:** Bluetooth e Wi-Fi Direct. Entre Android e iPhone o app precisa estar aberto e é lento.
+- **Perto:** Bluetooth e Wi-Fi Direct. Entre Android e iPhone o app precisa estar aberto e é lento. No Android, só do 12 em diante: abaixo disso, procurar Bluetooth exige localização, e o modo Direto fica desligado (`arquitetura/modo-direto.md`, decisão 5).
 - **Som (ultrassom):** só para trocar o código de contato. Estimo dezenas de bytes por segundo.
-- **Local:** mensagem só abre num raio definido (por exemplo, 30 m). A conferência é feita no aparelho, e a coordenada não vai para o servidor.
-- **Rádio de longa distância:** rádio LoRa pequeno ligado ao celular por Bluetooth, no modelo do projeto aberto Meshtastic. Exige hardware extra por pessoa.
-- **Cubo:** estima distância juntando Bluetooth, Wi-Fi, GPS e som (Kalman). A elipse no mapa mostra a incerteza.
+- **Local:** mensagem só abre num raio definido (por exemplo, 30 m). Opcional e desligado por padrão: a permissão de localização só é pedida quando a pessoa liga, e nunca em segundo plano. A distância vem só do GPS, nunca do Bluetooth, do Wi-Fi ou do som. A conferência é feita no aparelho, e a coordenada não vai para o servidor (`arquitetura/modo-direto.md`, decisão 11).
+- **Rádio de longa distância:** rádio LoRa pequeno ligado ao celular por Bluetooth, no modelo do projeto aberto Meshtastic, com firmware próprio: o código do Meshtastic é GPL-3.0 e fica fora. Exige hardware extra por pessoa, homologado pela Anatel.
+- **Cubo:** escolhe o meio sozinho pela qualidade do enlace (sinal, perda de pedaço, tempo medido, SNR do LoRa), com filtro de Kalman e descarte de medida errada (RANSAC). Em Rust, no núcleo. Não estima distância nem posição (mudado em 08/11/2026, `arquitetura/modo-direto.md`, decisão 10).
 
 
 ## 9. O que a solução NÃO resolve
@@ -94,7 +94,7 @@ Telas de apoio aprovadas: novo contato (QR, código, som), criar grupo, configur
 - Quem lê pode decorar, anotar ou fotografar com outro celular. A marca d'água só dissuade.
 - Um app modificado pode não apagar. A atestação dificulta, mas computadores ficam sem esse controle.
 - Metadados: o servidor vê IP e horário, a menos que o roteamento em camadas esteja ligado.
-- O GPS pode ser falsificado em celular com root. O Cubo dificulta, mas não elimina.
+- O GPS pode ser falsificado em celular com root, e no modo Local o Kryptos não tem como conferir: o Cubo deixou de estimar posição (08/11/2026), para o app não derivar localização do Bluetooth.
 - iPhone não tem bloqueio oficial de print.
 
 

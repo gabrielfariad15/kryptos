@@ -14,6 +14,8 @@ import android.bluetooth.BluetoothGattServerCallback
 import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothServerSocket
+import android.bluetooth.BluetoothSocket
 import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertisingSet
@@ -35,13 +37,18 @@ import android.util.Log
 import android.view.WindowManager
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
+import java.io.Closeable
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.security.SecureRandom
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.Executors
 
 /**
  * Sonda medida do modo Direto (documentacao/arquitetura/modo-direto.md, passo 1). Só no app
@@ -52,7 +59,10 @@ import java.util.UUID
  *  - SERVIDOR: abre o serviço GATT e anuncia em dois conjuntos, o legado (1M) e, se o
  *    aparelho tiver, o de longo alcance (PHY Coded, anúncio estendido).
  *  - CLIENTE: procura, conecta, pede MTU, ajusta PHY e prioridade, e faz n idas (cliente
- *    escreve sem resposta) e n voltas (servidor notifica), cada uma conferida pelo SHA-256.
+ *    escreve sem resposta) e n voltas, cada uma conferida pelo SHA-256. A volta vai pelo
+ *    caminho escolhido na tela (QuadroSonda): NOTIFICACAO (servidor notifica), ESCRITA
+ *    (servidor vira cliente GATT do cliente no mesmo enlace e escreve sem resposta) ou
+ *    L2CAP (canal L2CAP orientado a conexão, sem pareamento).
  *  - AMBOS: os dois papéis ao mesmo tempo; o desempate é uma espera aleatória antes de
  *    conectar, sem nenhum dado a mais no anúncio.
  *
@@ -75,6 +85,10 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         val UUID_ENTRADA: UUID = UUID.fromString("afd54b5e-7086-4e42-be9b-1c555eed9570") // cliente -> servidor
         val UUID_SAIDA: UUID = UUID.fromString("127449fd-703e-4fc1-83b2-1794f64f8c76")   // servidor -> cliente
         val UUID_CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        // Caminho de volta ESCRITA: serviço aberto pelo CLIENTE, onde o servidor escreve.
+        // Não vai em anúncio nenhum; o servidor acha pela descoberta de serviços.
+        val UUID_SERVICO_VOLTA: UUID = UUID.fromString("736a45bc-a4ca-4a24-9b86-09393ce0b4b3")
+        val UUID_VOLTA_ENTRADA: UUID = UUID.fromString("4b092b30-6288-4af6-9a06-a526e34296a3")
 
         // A maior carta medida (transportes.md, texto de 64 KiB). Medida, não estimada.
         const val TAMANHO_CARTA = 66_594
@@ -85,6 +99,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         const val TEMPO_OPERACAO_MS = 10_000L
         const val TEMPO_PHY_MS = 3_000L
         const val TEMPO_TRANSFERENCIA_MS = 30_000L
+        // Preparar a volta ESCRITA ou L2CAP: abrir o caminho e o outro lado responder.
+        const val TEMPO_PREPARAR_MS = 15_000L
+        val CAMINHOS = setOf("NOTIFICACAO", "ESCRITA", "L2CAP")
         // Limite do Android: 5 startScan em 30 s por app; a sexta fica muda, sem erro.
         const val PROCURAS_POR_JANELA = 5
         const val JANELA_PROCURAS_MS = 30_000L
@@ -158,9 +175,10 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                     distancia = call.argument<Int>("distancia") ?: 0,
                     repeticoes = call.argument<Int>("repeticoes") ?: 5,
                     calibrar = call.argument<Boolean>("calibrar") ?: false,
+                    volta = call.argument<String>("volta") ?: "NOTIFICACAO",
                 )
                 if (cfg.phy !in setOf("1M", "2M", "CODED") || cfg.prioridade !in setOf("PADRAO", "ALTA") ||
-                    cfg.repeticoes !in 1..50 || cfg.distancia < 0
+                    cfg.repeticoes !in 1..50 || cfg.distancia < 0 || cfg.volta !in CAMINHOS
                 ) {
                     result.error("ARGUMENTO", "configuracao fora do esperado", null)
                     return
@@ -329,7 +347,31 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private var voltaServidorN = 0
     private var voltaServidorComeco = 0L
     private var voltaServidorPedacos = 0
-    private val tempoVoltaServidor = Runnable { falha("TEMPO_ESGOTADO", "papel=servidor etapa=volta n=$voltaServidorN"); esvaziarNotificacoes() }
+    private var voltaServidorCaminho = QuadroSonda.CAMINHO_NOTIFICACAO
+    private val tempoVoltaServidor = Runnable {
+        falha("TEMPO_ESGOTADO", "papel=servidor etapa=volta caminho=${QuadroSonda.nomeDoCaminho(voltaServidorCaminho)} n=$voltaServidorN")
+        esvaziarNotificacoes()
+        esvaziarReversa()
+    }
+
+    // Volta ESCRITA: este aparelho (servidor) conecta como cliente GATT no aparelho que
+    // conectou nele, pelo mesmo enlace, e escreve sem resposta no serviço de volta de lá.
+    private var reversa: BluetoothGatt? = null
+    private var reversaEntrada: BluetoothGattCharacteristic? = null
+    private var reversaPronta = false
+    private var reversaMtu = 23
+    private var reversaComeco = 0L
+    private val filaReversa = ArrayDeque<ByteArray>()
+    private var escrevendoReversa = false
+    private var ocupadoReversa = 0
+    private val tempoReversa = Runnable { if (reversa != null && !reversaPronta) prontoFalhou(QuadroSonda.CAMINHO_ESCRITA, "TEMPO_ESGOTADO") }
+    private val tempoMtuReversa = Runnable { if (reversa != null && !reversaPronta && reversaEntrada != null) concluirReversa(mtuServidor, "herdado") }
+
+    // Volta L2CAP: escuta num PSM dinâmico; o PSM vai ao cliente no PRONTO.
+    private var l2capEscuta: BluetoothServerSocket? = null
+    private var l2capServidor: BluetoothSocket? = null
+    private var geracaoL2capServidor = 0
+    private val escritorL2cap = Executors.newSingleThreadExecutor { Thread(it, "sonda-l2cap-escrita") }
 
     private fun iniciarServidor(modo: String) {
         if (!pronto()) return
@@ -446,6 +488,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                     clienteDoServidor = null
                     remontagemServidor = null
                     esvaziarNotificacoes()
+                    fecharReversa()
+                    fecharL2capServidor()
                     h.removeCallbacks(tempoVoltaServidor)
                     medida("servidor", "evento=desconectou status=$status")
                 }
@@ -511,28 +555,63 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 )
                 notificar(listOf(QuadroSonda.resultado(r)), envioDeVolta = false)
             }
+            QuadroSonda.TIPO_PREPARAR -> {
+                val c = QuadroSonda.lerPreparar(q)
+                val d = clienteDoServidor
+                if (c == null || d == null) { falha("QUADRO_INVALIDO", "papel=servidor tipo=preparar"); return }
+                when (c) {
+                    QuadroSonda.CAMINHO_ESCRITA -> abrirReversa(d)
+                    QuadroSonda.CAMINHO_L2CAP -> abrirEscutaL2cap()
+                }
+            }
             QuadroSonda.TIPO_PEDIR_VOLTA -> {
                 val p = QuadroSonda.lerPedirVolta(q)
                 if (p == null) { falha("QUADRO_INVALIDO", "papel=servidor tipo=pedir_volta"); return }
+                val nomeCaminho = QuadroSonda.nomeDoCaminho(p.caminho)
+                val pronto = when (p.caminho) {
+                    QuadroSonda.CAMINHO_ESCRITA -> reversaPronta
+                    QuadroSonda.CAMINHO_L2CAP -> l2capServidor != null
+                    else -> true
+                }
+                if (!pronto) { falha("VOLTA_NAO_PREPARADA", "papel=servidor caminho=$nomeCaminho n=${p.n}"); return }
                 val dados = ByteArray(TAMANHO_CARTA).also { sorteio.nextBytes(it) }
-                val tam = QuadroSonda.tamanhoDoPedaco(mtuServidor)
+                // L2CAP não tem o teto de 512 do atributo, mas usa o mesmo quadro para a
+                // comparação ser só do caminho. O que vai no ar são pacotes de até 251 bytes
+                // em qualquer caso (extensão de tamanho de dados do BLE).
+                val mtu = when (p.caminho) {
+                    QuadroSonda.CAMINHO_ESCRITA -> reversaMtu
+                    QuadroSonda.CAMINHO_L2CAP -> MTU_PEDIDO
+                    else -> mtuServidor
+                }
+                val tam = QuadroSonda.tamanhoDoPedaco(mtu)
                 val quadros = listOf(QuadroSonda.inicio(p.n, dados, tam)) + QuadroSonda.pedacos(dados, tam, p.sabotagem)
                 voltaServidorN = p.n
+                voltaServidorCaminho = p.caminho
                 voltaServidorPedacos = QuadroSonda.quantosPedacos(TAMANHO_CARTA, tam)
                 voltaServidorComeco = SystemClock.elapsedRealtime()
                 h.removeCallbacks(tempoVoltaServidor)
                 h.postDelayed(tempoVoltaServidor, TEMPO_TRANSFERENCIA_MS)
-                notificar(quadros, envioDeVolta = true)
+                when (p.caminho) {
+                    QuadroSonda.CAMINHO_ESCRITA -> escreverReversa(quadros)
+                    QuadroSonda.CAMINHO_L2CAP -> enviarL2cap(quadros)
+                    else -> notificar(quadros, envioDeVolta = true)
+                }
             }
             QuadroSonda.TIPO_RESULTADO -> {
                 val r = QuadroSonda.lerResultado(q)
                 if (r == null) { falha("QUADRO_INVALIDO", "papel=servidor tipo=resultado"); return }
                 h.removeCallbacks(tempoVoltaServidor)
                 val ms = SystemClock.elapsedRealtime() - voltaServidorComeco
+                val (ocupadoVolta, mtuVolta) = when (voltaServidorCaminho) {
+                    QuadroSonda.CAMINHO_ESCRITA -> ocupadoReversa.toString() to reversaMtu.toString()
+                    QuadroSonda.CAMINHO_L2CAP -> "-" to "-" // fluxo com créditos: não há "ocupado" nem MTU do GATT
+                    else -> ocupadoNotificacao.toString() to mtuServidor.toString()
+                }
                 medida(
                     "servidor-enviou",
-                    "n=${r.n} bytes=$TAMANHO_CARTA pedacos=$voltaServidorPedacos ms=$ms kbps=${kbps(TAMANHO_CARTA, ms)} " +
-                        "resultado=${QuadroSonda.nomeDoCodigo(r.codigo)} ocupado=$ocupadoNotificacao mtu=$mtuServidor",
+                    "n=${r.n} caminho=${QuadroSonda.nomeDoCaminho(voltaServidorCaminho)} bytes=$TAMANHO_CARTA pedacos=$voltaServidorPedacos " +
+                        "ms=$ms kbps=${kbps(TAMANHO_CARTA, ms)} resultado=${QuadroSonda.nomeDoCodigo(r.codigo)} " +
+                        "ocupado=$ocupadoVolta mtu=$mtuVolta",
                 )
             }
             else -> falha("QUADRO_INVALIDO", "papel=servidor tipo=desconhecido")
@@ -567,6 +646,192 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         h.postDelayed({ notificarProximo() }, 2)
     }
 
+    private fun prontoFalhou(caminho: Int, motivo: String) {
+        falha("VOLTA_PREPARAR", "papel=servidor caminho=${QuadroSonda.nomeDoCaminho(caminho)} motivo=$motivo")
+        if (caminho == QuadroSonda.CAMINHO_ESCRITA) fecharReversa() else fecharL2capServidor()
+        notificar(listOf(QuadroSonda.pronto(caminho, QuadroSonda.PRONTO_FALHOU)), envioDeVolta = false)
+    }
+
+    // ---------- volta ESCRITA (servidor como cliente GATT do cliente) ----------
+
+    private fun abrirReversa(d: BluetoothDevice) {
+        fecharReversa()
+        reversaComeco = SystemClock.elapsedRealtime()
+        // Mesmo aparelho: espero que o Android use o enlace que já existe (palpite; a
+        // sonda mede pelo ms do servidor-volta e por VOLTA_PREPARAR).
+        val g = d.connectGatt(contexto, false, retornoReversa, BluetoothDevice.TRANSPORT_LE, BluetoothDevice.PHY_LE_1M_MASK, h)
+        if (g == null) { prontoFalhou(QuadroSonda.CAMINHO_ESCRITA, "CONEXAO_RECUSADA"); return }
+        reversa = g
+        h.postDelayed(tempoReversa, TEMPO_PREPARAR_MS)
+    }
+
+    private val retornoReversa = object : BluetoothGattCallback() {
+        // Chega na thread da sonda (connectGatt com o Handler h).
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (g != reversa) { g.close(); return }
+            if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                if (!reversaPronta && !g.discoverServices()) prontoFalhou(QuadroSonda.CAMINHO_ESCRITA, "SERVICOS_RECUSADO")
+            } else {
+                if (reversaPronta) falha("VOLTA_CAIU", "papel=servidor caminho=ESCRITA status=$status")
+                else prontoFalhou(QuadroSonda.CAMINHO_ESCRITA, "CONEXAO_status_$status")
+                fecharReversa()
+            }
+        }
+
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            if (g != reversa || reversaPronta) return
+            val c = g.getService(UUID_SERVICO_VOLTA)?.getCharacteristic(UUID_VOLTA_ENTRADA)
+            if (status != BluetoothGatt.GATT_SUCCESS || c == null) {
+                prontoFalhou(QuadroSonda.CAMINHO_ESCRITA, if (c == null) "SERVICO_AUSENTE" else "SERVICOS_status_$status")
+                return
+            }
+            reversaEntrada = c
+            // O MTU é do enlace e já foi trocado pelo outro lado; o pedido aqui pode não
+            // ter resposta. Sem resposta em TEMPO_PHY_MS, usa o MTU que o servidor já sabe.
+            if (!g.requestMtu(MTU_PEDIDO)) { concluirReversa(mtuServidor, "herdado"); return }
+            h.postDelayed(tempoMtuReversa, TEMPO_PHY_MS)
+        }
+
+        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            if (g != reversa || reversaPronta) return
+            if (status == BluetoothGatt.GATT_SUCCESS) concluirReversa(mtu, "pedido") else concluirReversa(mtuServidor, "herdado")
+        }
+
+        override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
+            if (g != reversa) return
+            escrevendoReversa = false
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                falha("ESCRITA", "papel=servidor caminho=ESCRITA status=$status n=$voltaServidorN")
+                esvaziarReversa()
+                return
+            }
+            if (filaReversa.isNotEmpty()) filaReversa.removeFirst()
+            escreverReversaProximo()
+        }
+    }
+
+    private fun concluirReversa(mtu: Int, origem: String) {
+        h.removeCallbacks(tempoReversa)
+        h.removeCallbacks(tempoMtuReversa)
+        reversaPronta = true
+        reversaMtu = mtu
+        val ms = SystemClock.elapsedRealtime() - reversaComeco
+        medida("servidor-volta", "caminho=ESCRITA resultado=pronta ms=$ms mtu=$mtu mtu_origem=$origem")
+        notificar(listOf(QuadroSonda.pronto(QuadroSonda.CAMINHO_ESCRITA, QuadroSonda.PRONTO_OK)), envioDeVolta = false)
+    }
+
+    private fun escreverReversa(quadros: List<ByteArray>) {
+        ocupadoReversa = 0
+        filaReversa.addAll(quadros)
+        escreverReversaProximo()
+    }
+
+    /** Mesmo controle de fluxo da ida: o próximo sai só depois do aviso da escrita. */
+    private fun escreverReversaProximo() {
+        val g = reversa ?: return
+        val c = reversaEntrada ?: return
+        if (escrevendoReversa || filaReversa.isEmpty()) return
+        when (val r = g.writeCharacteristic(c, filaReversa.first(), BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)) {
+            BluetoothStatusCodes.SUCCESS -> escrevendoReversa = true
+            BluetoothStatusCodes.ERROR_GATT_WRITE_REQUEST_BUSY -> {
+                ocupadoReversa++
+                if (ocupadoReversa > TENTATIVAS_OCUPADO_MAX) {
+                    falha("ESCRITA_OCUPADA", "papel=servidor caminho=ESCRITA n=$voltaServidorN")
+                    esvaziarReversa()
+                } else {
+                    h.postDelayed({ if (reversa === g) escreverReversaProximo() }, 2)
+                }
+            }
+            else -> { falha("ESCRITA_RECUSADA", "papel=servidor caminho=ESCRITA codigo=$r"); esvaziarReversa() }
+        }
+    }
+
+    private fun esvaziarReversa() {
+        filaReversa.clear()
+        escrevendoReversa = false
+    }
+
+    private fun fecharReversa() {
+        h.removeCallbacks(tempoReversa)
+        h.removeCallbacks(tempoMtuReversa)
+        val g = reversa
+        reversa = null
+        reversaEntrada = null
+        reversaPronta = false
+        esvaziarReversa()
+        try { g?.disconnect(); g?.close() } catch (e: Exception) { Log.e(TAG, "fechar volta: ${e.javaClass.simpleName}") }
+    }
+
+    // ---------- volta L2CAP ----------
+
+    private fun abrirEscutaL2cap() {
+        fecharL2capServidor()
+        val escuta = try {
+            adaptador!!.listenUsingInsecureL2capChannel()
+        } catch (e: IOException) {
+            prontoFalhou(QuadroSonda.CAMINHO_L2CAP, "ESCUTA_${e.javaClass.simpleName}")
+            return
+        }
+        val geracao = ++geracaoL2capServidor
+        l2capEscuta = escuta
+        val comeco = SystemClock.elapsedRealtime()
+        Thread({
+            val s: BluetoothSocket? = try { escuta.accept(TEMPO_PREPARAR_MS.toInt()) } catch (e: IOException) { null }
+            fecharQuieto(escuta) // um cliente só; o PSM fica livre
+            h.post { aceitouL2cap(geracao, s, comeco) }
+        }, "sonda-l2cap-escuta").start()
+        notificar(listOf(QuadroSonda.pronto(QuadroSonda.CAMINHO_L2CAP, QuadroSonda.PRONTO_OK, escuta.psm)), envioDeVolta = false)
+    }
+
+    private fun aceitouL2cap(geracao: Int, s: BluetoothSocket?, comeco: Long) {
+        if (geracao != geracaoL2capServidor || servidor == null) { fecharQuieto(s); return }
+        l2capEscuta = null
+        if (s == null) { falha("TEMPO_ESGOTADO", "papel=servidor etapa=l2cap_aceitar"); return }
+        if (s.remoteDevice != clienteDoServidor) {
+            fecharQuieto(s)
+            medida("servidor", "evento=l2cap_outro_recusado")
+            return
+        }
+        l2capServidor = s
+        medida(
+            "servidor-volta",
+            "caminho=L2CAP resultado=pronta ms=${SystemClock.elapsedRealtime() - comeco} " +
+                "tx_max=${s.maxTransmitPacketSize} rx_max=${s.maxReceivePacketSize}",
+        )
+    }
+
+    /** Escreve numa thread própria: a escrita no canal bloqueia quando acabam os créditos. */
+    private fun enviarL2cap(quadros: List<ByteArray>) {
+        val s = l2capServidor ?: return
+        val geracao = geracaoL2capServidor
+        escritorL2cap.execute {
+            try {
+                val saida = BufferedOutputStream(s.outputStream, 8192)
+                for (q in quadros) QuadroSonda.escreverMoldura(saida, q)
+                saida.flush()
+            } catch (e: IOException) {
+                h.post {
+                    if (geracao == geracaoL2capServidor) {
+                        falha("L2CAP_ESCRITA", "papel=servidor erro=${e.javaClass.simpleName} n=$voltaServidorN")
+                        fecharL2capServidor()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun fecharL2capServidor() {
+        geracaoL2capServidor++
+        fecharQuieto(l2capEscuta)
+        fecharQuieto(l2capServidor)
+        l2capEscuta = null
+        l2capServidor = null
+    }
+
+    private fun fecharQuieto(c: Closeable?) {
+        try { c?.close() } catch (e: IOException) { Log.e(TAG, "fechar canal: ${e.javaClass.simpleName}") }
+    }
+
     private fun aoServidorConectado(device: BluetoothDevice) {
         if (servidorModo != "AMBOS") return
         // O Android avisa o servidor também da conexão que este aparelho abriu como
@@ -599,6 +864,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         clienteDoServidor = null
         remontagemServidor = null
         esvaziarNotificacoes()
+        fecharReversa()
+        fecharL2capServidor()
         servidorPronto = false
     }
 
@@ -609,7 +876,10 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private data class Config(
         val modo: String, val phy: String, val prioridade: String,
         val distancia: Int, val repeticoes: Int, val calibrar: Boolean,
-    )
+        val volta: String,
+    ) {
+        val caminho: Int get() = QuadroSonda.caminhoDoNome(volta) ?: QuadroSonda.CAMINHO_NOTIFICACAO
+    }
 
     private sealed class Ev {
         data class Servicos(val status: Int) : Ev()
@@ -618,6 +888,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         data class Descritor(val status: Int) : Ev()
         data class Escreveu(val status: Int) : Ev()
         data class Rssi(val rssi: Int, val status: Int) : Ev()
+        data class ServicoVolta(val status: Int) : Ev()
     }
 
     private var cliente: Config? = null
@@ -643,9 +914,16 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private var etapaTransferencia = ""
     private val tempoTransferencia = Runnable { falharCliente("TEMPO_ESGOTADO", "etapa=$etapaTransferencia") }
 
+    // Volta ESCRITA: serviço aberto por este aparelho (cliente) para o servidor escrever.
+    private var servidorVolta: BluetoothGattServer? = null
+    // Volta L2CAP: o canal aberto por este aparelho e o que está conectando.
+    private var l2capCliente: BluetoothSocket? = null
+    @Volatile private var l2capConectando: BluetoothSocket? = null
+    private var geracaoL2capCliente = 0
+
     private fun campos(c: Config) =
         "rodada=$rodada modo=${c.modo} distancia=${c.distancia} phy=${c.phy} prioridade=${c.prioridade} " +
-            "calibrar=${sn(c.calibrar)}"
+            "volta=${c.volta} calibrar=${sn(c.calibrar)}"
 
     /** Espera um evento. O tratador devolve true quando consumiu; false, continua esperando. */
     private fun esperar(nome: String, ms: Long, tratar: (Ev) -> Boolean) {
@@ -867,7 +1145,11 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             if (ev !is Ev.Descritor) return@esperar false
             seguir {
                 if (ev.status != BluetoothGatt.GATT_SUCCESS) { falharCliente("NOTIFICACAO", "status=${ev.status}"); return@seguir }
-                ida(g, cfg, 1)
+                when (cfg.caminho) {
+                    QuadroSonda.CAMINHO_ESCRITA -> abrirServidorVolta(g, cfg)
+                    QuadroSonda.CAMINHO_L2CAP -> prepararVolta(g, cfg, SystemClock.elapsedRealtime())
+                    else -> ida(g, cfg, 1)
+                }
             }
         }
     }
@@ -877,6 +1159,136 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         n == 1 -> QuadroSonda.SABOTAGEM_TROCAR_BYTE
         n == 2 -> QuadroSonda.SABOTAGEM_PULAR_PEDACO
         else -> QuadroSonda.SABOTAGEM_NENHUMA
+    }
+
+    // ---------- preparar a volta ESCRITA ou L2CAP ----------
+
+    private fun abrirServidorVolta(g: BluetoothGatt, cfg: Config) {
+        val comeco = SystemClock.elapsedRealtime()
+        val sv = gerente!!.openGattServer(contexto, retornoServidorVolta)
+        if (sv == null) { falharCliente("SERVIDOR_VOLTA_NAO_ABRIU"); return }
+        servidorVolta = sv
+        val servico = BluetoothGattService(UUID_SERVICO_VOLTA, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+        servico.addCharacteristic(
+            BluetoothGattCharacteristic(
+                UUID_VOLTA_ENTRADA,
+                BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE or BluetoothGattCharacteristic.PROPERTY_WRITE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE,
+            ),
+        )
+        if (!sv.addService(servico)) { falharCliente("SERVICO_VOLTA_RECUSADO"); return }
+        esperar("servico_volta", TEMPO_OPERACAO_MS) { ev ->
+            if (ev !is Ev.ServicoVolta) return@esperar false
+            seguir {
+                if (ev.status != BluetoothGatt.GATT_SUCCESS) falharCliente("SERVICO_VOLTA_RECUSADO", "status=${ev.status}")
+                else prepararVolta(g, cfg, comeco)
+            }
+        }
+    }
+
+    private val retornoServidorVolta = object : BluetoothGattServerCallback() {
+        override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
+            h.post { entregar(Ev.ServicoVolta(status)) }
+        }
+
+        override fun onCharacteristicWriteRequest(
+            device: BluetoothDevice, requestId: Int, characteristic: BluetoothGattCharacteristic,
+            preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray?,
+        ) {
+            if (responseNeeded) servidorVolta?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
+            val copia = value?.copyOf() ?: ByteArray(0)
+            // Só aceita do aparelho em que este conectou.
+            h.post { if (device == dispositivoAlvo && characteristic.uuid == UUID_VOLTA_ENTRADA) aoChegar?.invoke(copia) }
+        }
+    }
+
+    /** Manda PREPARAR e espera o PRONTO (e o aviso da escrita do PREPARAR). */
+    private fun prepararVolta(g: BluetoothGatt, cfg: Config, comeco: Long) {
+        var pronto: QuadroSonda.Pronto? = null
+        var escritaFim = false
+        fun talvezSeguir() {
+            val p = pronto ?: return
+            if (!escritaFim) return
+            pararTransferencia()
+            if (p.codigo != QuadroSonda.PRONTO_OK) {
+                falharCliente("VOLTA_PREPARAR", "codigo=${p.codigo}")
+                return
+            }
+            if (cfg.caminho == QuadroSonda.CAMINHO_L2CAP) {
+                conectarL2cap(g, cfg, p.psm, comeco)
+            } else {
+                medida("volta-pronta", "${campos(cfg)} ms=${SystemClock.elapsedRealtime() - comeco}")
+                ida(g, cfg, 1)
+            }
+        }
+        iniciarTransferencia("preparar") { v ->
+            val p = QuadroSonda.lerPronto(v)
+            if (p != null && p.caminho == cfg.caminho && pronto == null) { pronto = p; talvezSeguir() }
+        }
+        escrever(g, listOf(QuadroSonda.preparar(cfg.caminho)), 0, IntArray(1)) { escritaFim = true; talvezSeguir() }
+    }
+
+    private fun conectarL2cap(g: BluetoothGatt, cfg: Config, psm: Int, comeco: Long) {
+        val d = dispositivoAlvo ?: return
+        val geracao = ++geracaoL2capCliente
+        etapa = "l2cap"
+        h.removeCallbacks(tempoEsgotado)
+        h.postDelayed(tempoEsgotado, TEMPO_CONEXAO_MS)
+        Thread({
+            var s: BluetoothSocket? = null
+            val erro = try {
+                s = d.createInsecureL2capChannel(psm)
+                l2capConectando = s
+                s.connect() // bloqueia; fechar o socket de outra thread desbloqueia
+                null
+            } catch (e: IOException) {
+                fecharQuieto(s)
+                e.javaClass.simpleName
+            } finally {
+                l2capConectando = null
+            }
+            h.post {
+                if (geracao != geracaoL2capCliente || cliente !== cfg) { fecharQuieto(s); return@post }
+                h.removeCallbacks(tempoEsgotado)
+                val canal = s
+                if (erro != null || canal == null) { falharCliente("L2CAP_CONEXAO", "erro=$erro"); return@post }
+                l2capCliente = canal
+                lerL2cap(canal, geracao)
+                medida(
+                    "volta-pronta",
+                    "${campos(cfg)} ms=${SystemClock.elapsedRealtime() - comeco} " +
+                        "tx_max=${canal.maxTransmitPacketSize} rx_max=${canal.maxReceivePacketSize}",
+                )
+                ida(g, cfg, 1)
+            }
+        }, "sonda-l2cap-conectar").start()
+    }
+
+    /** Lê molduras numa thread própria e entrega cada quadro na thread da sonda. */
+    private fun lerL2cap(s: BluetoothSocket, geracao: Int) {
+        Thread({
+            val erro = try {
+                val entrada = BufferedInputStream(s.inputStream, 8192)
+                while (true) {
+                    val q = QuadroSonda.lerMoldura(entrada) ?: break
+                    h.post { if (geracao == geracaoL2capCliente) aoChegar?.invoke(q) }
+                }
+                "FECHADO"
+            } catch (e: IOException) {
+                e.javaClass.simpleName
+            }
+            h.post { if (geracao == geracaoL2capCliente && cliente != null) falharCliente("L2CAP_CAIU", "erro=$erro etapa=$etapa") }
+        }, "sonda-l2cap-leitura").start()
+    }
+
+    private fun fecharVoltaCliente() {
+        geracaoL2capCliente++
+        fecharQuieto(l2capConectando)
+        fecharQuieto(l2capCliente)
+        l2capCliente = null
+        val sv = servidorVolta
+        servidorVolta = null
+        try { sv?.clearServices(); sv?.close() } catch (e: Exception) { Log.e(TAG, "fechar servico de volta: ${e.javaClass.simpleName}") }
     }
 
     // ---------- ida: o cliente escreve sem resposta, o servidor confere ----------
@@ -963,7 +1375,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         }
     }
 
-    // ---------- volta: o servidor notifica, o cliente confere ----------
+    // ---------- volta: o servidor manda pelo caminho escolhido, o cliente confere ----------
 
     private fun volta(g: BluetoothGatt, cfg: Config, n: Int) {
         val comeco = SystemClock.elapsedRealtime()
@@ -1009,7 +1421,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 else -> Unit
             }
         }
-        escrever(g, listOf(QuadroSonda.pedirVolta(n, sabotagem(cfg, n))), 0, IntArray(1)) { escritaFim = true; talvezSeguir() }
+        escrever(g, listOf(QuadroSonda.pedirVolta(n, sabotagem(cfg, n), cfg.caminho)), 0, IntArray(1)) { escritaFim = true; talvezSeguir() }
     }
 
     private fun terminarRodada(cfg: Config) {
@@ -1019,7 +1431,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             val ok = vistosIda == esperado && vistosVolta == esperado
             medida(
                 "calibracao",
-                "rodada=$rodada resultado=${if (ok) "OK" else "FALHOU"} ida=${vistosIda.joinToString(",")} volta=${vistosVolta.joinToString(",")}",
+                "rodada=$rodada volta=${cfg.volta} resultado=${if (ok) "OK" else "FALHOU"} ida=${vistosIda.joinToString(",")} voltas=${vistosVolta.joinToString(",")}",
             )
         }
         pararCliente()
@@ -1042,6 +1454,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         cliente = null
         dispositivoAlvo = null
         entradaCliente = null
+        fecharVoltaCliente()
         try {
             g?.disconnect()
             g?.close()
@@ -1073,6 +1486,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     fun encerrar() {
         h.post {
             parar("APP_FECHOU")
+            escritorL2cap.shutdownNow()
             linha.quitSafely()
         }
     }

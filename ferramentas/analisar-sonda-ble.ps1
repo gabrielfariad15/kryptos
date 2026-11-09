@@ -4,8 +4,9 @@
 # instalar-no-celular.ps1 -SondaBle traz de cada celular depois do FIM, e imprime:
 #   - o que cada celular tem de radio (inventario);
 #   - anuncios, tempo ate achar, conexao (MTU, pedaco, PHY);
-#   - idas e voltas por distancia, PHY e prioridade: conferidas, tempo e kbit/s
-#     (mediana, minimo, maximo) e RSSI;
+#   - idas e voltas por distancia, PHY, prioridade e caminho da volta (NOTIFICACAO,
+#     ESCRITA ou L2CAP): conferidas, tempo e kbit/s (mediana, minimo, maximo) e RSSI;
+#   - o preparo dos caminhos ESCRITA e L2CAP (quanto levou para abrir);
 #   - o lado do servidor, a calibracao, o desfecho do modo AMBOS e as falhas por codigo;
 #   - o alcance por PHY: ate onde conferiu e onde deixou de achar.
 #
@@ -13,7 +14,10 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\analisar-sonda-ble.ps1 -Arquivos <a.txt>,<b.txt>
 #
 # RESULTADO: OK so com os arquivos lidos e pelo menos uma calibracao OK e nenhuma
-# calibracao FALHOU: sem o conferidor calibrado, as medidas nao valem (regra 5.3).
+# calibracao FALHOU: sem o conferidor calibrado, as medidas nao valem (regra 5.3). Cada
+# caminho de volta medido precisa da sua calibracao OK: a moldura do L2CAP e a escrita do
+# servidor sao codigo novo no caminho dos bytes.
+# Arquivos de antes do caminho de volta (sem volta=) contam como NOTIFICACAO.
 # Rodadas de calibracao (calibrar=sim) ficam fora das estatisticas de ida e volta.
 # Distancia com RSSI quase igual ao de 1 m sai como AVISO e fica fora do alcance.
 # As linhas tem so codigos e numeros (regra 8.2): nada a esconder ao colar a saida.
@@ -54,6 +58,13 @@ function Campos([string]$t) {
         if ($i -gt 0) { $h[$p.Substring(0, $i)] = $p.Substring($i + 1) }
     }
     return $h
+}
+
+# Caminho da volta de uma linha; linhas antigas, sem o campo, eram todas por notificacao.
+function Volta($r) {
+    if ($r.C.ContainsKey('volta')) { return $r.C['volta'] }
+    if ($r.C.ContainsKey('caminho')) { return $r.C['caminho'] }
+    return 'NOTIFICACAO'
 }
 
 function Valores($lista, [string]$campo) {
@@ -123,8 +134,8 @@ try {
 
     # ---------- idas e voltas (fora da calibracao) ----------
     $transf = @($medidas | Where-Object { ($_.Evento -eq 'ida' -or $_.Evento -eq 'volta') -and $_.C['calibrar'] -ne 'sim' })
-    foreach ($g in @($transf | Group-Object { "$($_.Evento) $($_.C['distancia']) $($_.C['phy']) $($_.C['prioridade'])" } |
-            Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] }, { $_.Group[0].C['prioridade'] }, { $_.Group[0].Evento })) {
+    foreach ($g in @($transf | Group-Object { "$($_.Evento) $($_.C['distancia']) $($_.C['phy']) $($_.C['prioridade']) $(Volta $_)" } |
+            Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] }, { $_.Group[0].C['prioridade'] }, { Volta $_.Group[0] }, { $_.Group[0].Evento })) {
         $r = $g.Group[0]
         $conf = @($g.Group | Where-Object { $_.C['resultado'] -eq 'CONFERIU' }).Count
         $msv = Valores $g.Group 'ms'
@@ -132,15 +143,30 @@ try {
         $max = ($msv | Measure-Object -Maximum).Maximum
         $rssi = if ($r.Evento -eq 'ida') { "; rssi mediana $(F (Mediana (Valores $g.Group 'rssi'))) dBm" } else { '' }
         $marca = if ($conf -eq $g.Count) { 'OK   ' } else { 'AVISO' }
-        $resultados.Add("$marca $("{0,-5}" -f $r.Evento) a $($r.C['distancia']) m, $($r.C['phy']) $($r.C['prioridade']): $conf de $($g.Count) conferidas; ms mediana $(F (Mediana $msv)) (min $(F $min), max $(F $max)); kbit/s mediana $(F (Mediana (Valores $g.Group 'kbps')))$rssi")
+        $resultados.Add("$marca $("{0,-5}" -f $r.Evento) a $($r.C['distancia']) m, $($r.C['phy']) $($r.C['prioridade']), volta $(Volta $r): $conf de $($g.Count) conferidas; ms mediana $(F (Mediana $msv)) (min $(F $min), max $(F $max)); kbit/s mediana $(F (Mediana (Valores $g.Group 'kbps')))$rssi")
     }
     if ($transf.Count -eq 0) { $resultados.Add('AVISO nenhuma ida ou volta fora da calibracao') }
 
+    # ---------- preparo dos caminhos de volta ----------
+    # volta-pronta: lado de quem procura (ms desde abrir o proprio servico ou pedir, ate a
+    # volta poder comecar). servidor-volta: lado de quem anuncia.
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'volta-pronta' -or ($_.Evento -eq 'servidor-volta' -and $_.C['resultado'] -eq 'pronta') } |
+            Group-Object { "$($_.Aparelho) $($_.Evento) $(Volta $_)" })) {
+        $r = $g.Group[0]
+        $extra = @(foreach ($k in @('mtu', 'mtu_origem', 'tx_max', 'rx_max')) {
+                $v = (@($g.Group | Where-Object { $_.C.ContainsKey($k) } | ForEach-Object { $_.C[$k] } | Sort-Object -Unique)) -join '/'
+                if ($v) { "$k $v" }
+            }) -join '; '
+        if ($extra) { $extra = "; $extra" }
+        $resultados.Add("OK    $($r.Evento) $($r.Aparelho) $(Volta $r): $($g.Count)x; ms mediana $(F (Mediana (Valores $g.Group 'ms')))$extra")
+    }
+
     # ---------- lado do servidor ----------
     foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'servidor-recebeu' -or $_.Evento -eq 'servidor-enviou' } |
-            Group-Object { "$($_.Aparelho) $($_.Evento) $($_.C['resultado'])" })) {
+            Group-Object { "$($_.Aparelho) $($_.Evento) $(if ($_.Evento -eq 'servidor-enviou') { Volta $_ }) $($_.C['resultado'])" })) {
         $r = $g.Group[0]
-        $resultados.Add("OK    $($r.Evento) $($r.Aparelho): $($g.Count)x $($r.C['resultado']); ms mediana $(F (Mediana (Valores $g.Group 'ms'))); mtu $((@($g.Group | ForEach-Object { $_.C['mtu'] } | Sort-Object -Unique)) -join '/')")
+        $porOnde = if ($r.Evento -eq 'servidor-enviou') { " por $(Volta $r)" } else { '' }
+        $resultados.Add("OK    $($r.Evento) $($r.Aparelho)$($porOnde): $($g.Count)x $($r.C['resultado']); ms mediana $(F (Mediana (Valores $g.Group 'ms'))); mtu $((@($g.Group | ForEach-Object { $_.C['mtu'] } | Sort-Object -Unique)) -join '/')")
     }
 
     # ---------- AMBOS ----------
@@ -152,8 +178,14 @@ try {
     $cal = @($medidas | Where-Object { $_.Evento -eq 'calibracao' })
     $calOk = @($cal | Where-Object { $_.C['resultado'] -eq 'OK' }).Count
     $calRuim = @($cal | Where-Object { $_.C['resultado'] -ne 'OK' })
-    foreach ($r in $calRuim) { $resultados.Add("FALHA calibracao rodada $($r.C['rodada']) ($($r.Aparelho)): ida=$($r.C['ida']) volta=$($r.C['volta'])") }
-    if ($calOk -gt 0) { $resultados.Add("OK    calibracao: $calOk OK, $($calRuim.Count) falhou") }
+    # Na linha da calibracao, volta= e o caminho; ida= e voltas= sao as listas de codigos.
+    # Linhas antigas tinham volta= com a lista: caminho NOTIFICACAO.
+    function CaminhoCal($r) { if ($r.C['volta'] -match '^(NOTIFICACAO|ESCRITA|L2CAP)$') { return $r.C['volta'] } return 'NOTIFICACAO' }
+    function CodigosVolta($r) { if ($r.C.ContainsKey('voltas')) { return $r.C['voltas'] } if ((CaminhoCal $r) -ne $r.C['volta']) { return $r.C['volta'] } return '?' }
+    foreach ($r in $calRuim) { $resultados.Add("FALHA calibracao rodada $($r.C['rodada']) ($($r.Aparelho)), volta $(CaminhoCal $r): ida=$($r.C['ida']) voltas=$(CodigosVolta $r)") }
+    $caminhosCalibrados = @($cal | Where-Object { $_.C['resultado'] -eq 'OK' } | ForEach-Object { CaminhoCal $_ } | Sort-Object -Unique)
+    if ($calOk -gt 0) { $resultados.Add("OK    calibracao: $calOk OK, $($calRuim.Count) falhou; caminhos calibrados: $($caminhosCalibrados -join '/')") }
+    $semCal = @($transf | Where-Object { $_.Evento -eq 'volta' } | ForEach-Object { Volta $_ } | Sort-Object -Unique | Where-Object { $caminhosCalibrados -notcontains $_ })
 
     # ---------- falhas ----------
     foreach ($g in @($falhas | Group-Object Evento | Sort-Object Count -Descending)) {
@@ -202,6 +234,7 @@ try {
 
     if ($calRuim.Count -gt 0) { throw 'a calibracao falhou: o conferidor da sonda nao pegou a sabotagem, as medidas nao valem' }
     if ($calOk -eq 0) { throw 'nenhuma calibracao OK nos arquivos: rode CALIBRAR a 1 m antes das medidas (regra 5.3)' }
+    if ($semCal.Count -gt 0) { throw "volta por $($semCal -join '/') sem calibracao OK: rode CALIBRAR com essa VOLTA marcada (regra 5.3)" }
     $ok = $true
 } catch {
     $resultados.Add("FALHA $($_.Exception.Message)")

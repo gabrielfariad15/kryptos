@@ -87,6 +87,7 @@ void main() {
     await tester.tap(find.byKey(const Key('sonda-phy-2M')));
     await tester.tap(find.byKey(const Key('sonda-prioridade-ALTA')));
     await tester.tap(find.byKey(const Key('sonda-distancia-10')));
+    await tester.tap(find.byKey(const Key('sonda-volta-L2CAP')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('sonda-procurar')));
     await tester.pumpAndSettle();
@@ -96,6 +97,7 @@ void main() {
       'phy': '2M',
       'prioridade': 'ALTA',
       'distancia': 10,
+      'volta': 'L2CAP',
       'repeticoes': 5,
       'calibrar': false,
     });
@@ -114,12 +116,16 @@ void main() {
       'phy': 'CODED',
       'prioridade': 'PADRAO',
       'distancia': 1,
+      'volta': 'NOTIFICACAO',
       'repeticoes': 3,
       'calibrar': true,
     });
+    await tester.tap(find.byKey(const Key('sonda-volta-ESCRITA')));
+    await tester.pump();
     await tester.tap(find.byKey(const Key('sonda-ambos')));
     await tester.pumpAndSettle();
     expect(a.chamadas.last.method, 'ambos');
+    expect(a.chamadas.last.arguments['volta'], 'ESCRITA');
     await tester.tap(find.byKey(const Key('sonda-anunciar')));
     await tester.pumpAndSettle();
     expect(a.chamadas.last.method, 'anunciar');
