@@ -14,10 +14,11 @@ Estas leis valem acima de qualquer decisão técnica, recomendação, regra de t
 ## Lei 1. Para a pessoa, funciona como o WhatsApp
 
 - Abre, escreve, manda, chega.
-- Nenhum detalhe técnico aparece: qual celular conectou, qual meio, nova tentativa, falha de conexão.
+- A pessoa escolhe com internet ou sem internet. Sem internet, o app mostra até quantos km consegue alcançar. Esse número vem de medida, nunca de chute.
+- Nenhum outro detalhe técnico aparece: qual celular conectou, nova tentativa, falha de conexão.
 - Falha de conexão é resolvida em silêncio, com nova tentativa automática.
 - Os dois lados mandam e recebem, não importa quem conectou.
-- O meio (internet, Bluetooth, rádio) é escolhido sozinho.
+- Sem internet, o meio (Bluetooth ou rádio) é escolhido sozinho.
 
 
 ## Lei 2. Com o app fechado, a mensagem chega; ao abrir, ela está lá
@@ -84,7 +85,9 @@ Estas leis valem acima de qualquer decisão técnica, recomendação, regra de t
 
 - Existe um único Kryptos, igual para todos e por todos os meios (internet, Bluetooth, rádio). Não há versão separada nem visual diferente por tipo de cliente.
 - Empresas e órgãos podem usar, mas no mesmo Modelo Espião: nada de registro, nada salvo, só texto.
-- Contato se adiciona de dois jeitos: pelo QR Code ou pelo código de contato.
+- Contato se adiciona de dois jeitos: lendo o QR Code da pessoa ou digitando o código de contato dela.
+- A pessoa dá ao contato o nome que quiser. O nome fica só no aparelho.
+- O visual aprovado é o do quadro "Kryptos — o app, Modelo Espião" (https://claude.ai/artifact/PbgzsUXbgYN43wDxhd8BmE), aprovado em 09/11/2026 e mantido.
 
 
 ## Lei 11. Código fechado
@@ -106,4 +109,5 @@ Decisões já tomadas que contrariam uma lei. Não seguir até o Gabriel decidir
 
 - 09/11/2026: versão 1. Motivo: recomendações que fugiam do que o Kryptos é fizeram o trabalho dar voltas. Exemplos: gravar as conversas no aparelho e pôr um número de cada celular no anúncio Bluetooth.
 - 09/11/2026: Leis 9 (só texto, nada salvo), 10 (Kryptos Empresa) e 11 (código fechado), decididas pelo Gabriel. Motivo da Lei 9: a mídia de visualização única do WhatsApp fica gravada na pasta do app.
+- 09/11/2026: Lei 1 mudada pelo Gabriel: dentro do app há a opção com internet e sem internet, e sem internet mostra até quantos km alcança. Lei 10: o nome do contato é escolhido pela pessoa; visual do quadro "Kryptos — o app, Modelo Espião" aprovado e mantido.
 - 09/11/2026: Lei 10 reescrita pelo Gabriel. Sai a linha separada "Kryptos Empresa", com painel; entra um app só, no Modelo Espião, para pessoas e empresas, com contato por QR ou código.

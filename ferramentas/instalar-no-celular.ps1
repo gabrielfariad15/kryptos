@@ -16,6 +16,7 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo -Alcance
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Ambos
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo -Ambos
 #
 # Sem parametro: exige um unico celular no cabo. Com mais de um, use -Todos ou -Serial.
 #
@@ -58,9 +59,14 @@
 #     sentidos, AMBOS 3 vezes e o ciclo de vida. Depois traz as medidas e analisa.
 #   -Ambos: os dois no cabo, a 1 m: so o AMBOS, 5 vezes com a espera aleatoria e 5 com
 #     espera 0 (colisao provocada), para conferir o desempate pelo OLA.
+#   -Autonomo -Ambos juntos: tudo de uma vez, um zip e um resumo.
 #   -Alcance: carrega o roteiro de distancias (o segundo celular procura, o primeiro
 #     anuncia); voce tira os cabos, leva os celulares a cada distancia e toca PROXIMO
 #     PONTO; no fim, cabos de volta e FIM. Sem -Autonomo, calibra a 1 m antes.
+#
+# Resumo: no fim de toda execucao, kryptos-resumo-<carimbo>.txt em Downloads, com o
+# resultado, o commit, os celulares e so as linhas FALHA e AVISO. E o arquivo para mandar
+# primeiro; o zip so quando for pedido.
 #
 # Coleta (-SondaBle e -LerSonda): tudo vai para um zip em Downloads, kryptos-sonda-<carimbo>.zip:
 #   - as medidas de cada celular (files/sonda-ble.txt, pelo run-as);
@@ -665,7 +671,9 @@ try {
                     if ($l -match '^(OK|AVISO|FALHA|RESULTADO)') { $resultados.Add("      $l") }
                 }
             } finally { $ErrorActionPreference = $antes }
-            if ($LASTEXITCODE -ne 0) { $roteiroOk = $false; break }
+            # Uma etapa que falhou nao impede a seguinte: -Autonomo -Ambos traz os dados das
+            # duas de uma vez. O resultado final continua FALHOU.
+            if ($LASTEXITCODE -ne 0) { $roteiroOk = $false }
         }
         if ($roteiroOk -and $Alcance) {
             Write-Host ''
@@ -833,6 +841,37 @@ try {
     Write-Host ''
     foreach ($linha in $resultados) { Write-Host $linha }
     if ($ok) { Write-Host 'RESULTADO: OK' } else { Write-Host 'RESULTADO: FALHOU' }
+    # Resumo para mandar ao Claude: so o que precisa de olho (FALHA e AVISO), com o contexto.
+    try {
+        $arqResumo = Join-Path $Amb.downloads "kryptos-resumo-$carimbo.txt"
+        $antes = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $commit = "$(& git -C $Repo rev-parse --short HEAD 2>$null)".Trim()
+        $ramo = "$(& git -C $Repo branch --show-current 2>$null)".Trim()
+        $ErrorActionPreference = $antes
+        $limpas = @($resultados | ForEach-Object { $_.Trim() })
+        $falhasR = @($limpas | Where-Object { $_ -like 'FALHA*' })
+        $avisosR = @($limpas | Where-Object { $_ -like 'AVISO*' })
+        $oksR = @($limpas | Where-Object { $_ -like 'OK*' })
+        $cel = if ($aparelhos) { (@($aparelhos | ForEach-Object { "$($_.Modelo), Android $($_.Android)" }) -join ' | ') } else { '(nenhum lido)' }
+        $linhasResumo = @(
+            "KRYPTOS - RESUMO DO TESTE $carimbo",
+            "Comando: instalar-no-celular.ps1 $((@($PSBoundParameters.Keys | ForEach-Object { "-$_" })) -join ' ')",
+            "Codigo: commit $(if ($commit) { $commit } else { '?' }) no ramo $(if ($ramo) { $ramo } else { '?' })",
+            "Celulares: $cel",
+            "RESULTADO: $(if ($ok) { 'OK' } else { 'FALHOU' })",
+            "Contagem: $($oksR.Count) OK, $($avisosR.Count) AVISO, $($falhasR.Count) FALHA",
+            '',
+            "FALHAS ($($falhasR.Count)):") + $(if ($falhasR.Count) { $falhasR | ForEach-Object { "  $_" } } else { @('  nenhuma') }) + @(
+            '',
+            "AVISOS ($($avisosR.Count)):") + $(if ($avisosR.Count) { $avisosR | ForEach-Object { "  $_" } } else { @('  nenhum') }) + @(
+            '',
+            "Tudo (medidas, logcat, analise e a janela inteira): kryptos-sonda-$carimbo.zip em Downloads")
+        Set-Content -LiteralPath $arqResumo -Value $linhasResumo -Encoding UTF8
+        # Entra no zip so quando ha coleta (sonda); sem ela, fica so o txt em Downloads.
+        if ($coleta.Count -gt 0) { $coleta.Add($arqResumo) }
+        Write-Host "Resumo para mandar: $arqResumo"
+    } catch { Write-Host "aviso: resumo: $($_.Exception.Message)" }
     if ($transcricao) {
         try {
             Stop-Transcript | Out-Null

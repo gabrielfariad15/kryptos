@@ -53,6 +53,14 @@ Decidido em 08/11/2026. Exigência de origem: `DECISOES-FASE-0.md` (seção 8) e
     - a transcrição da janela, sem o cabeçalho do PowerShell;
     - bateria e temperatura no começo e no fim;
     - tudo num zip. As medidas vêm mesmo quando o roteiro falha.
+14. **Linha cruzada no AMBOS: plano B dentro da rodada, sem nada novo no anúncio (Leis 1 e 4).** Quando os dois abrem conexão no mesmo instante, o Android de um deles recusa o enlace duplicado, e a rodada pode acabar sem cliente (resultado abaixo, rodadas 8 e 9).
+    - Antes do OLA aceito, falha de conexão no AMBOS (`CONEXAO_CAIU`, `TEMPO_ESGOTADO`, `SERVICOS`, `SERVICOS_RECUSADO`, `CONEXAO_RECUSADA`) não encerra a rodada. A sonda fecha a conexão, fica só de servidor por 3 s mais uma espera sorteada de até 1,5 s e tenta de novo uma vez (`SondaBle.recuperarAmbos`). Os 3 s são estimativa minha.
+    - Se o outro conectar nesse meio-tempo, o OLA dele para este cliente, e este fica de servidor (o ramo da decisão 12).
+    - No log, a recuperação é `MEDIDA`, não `FALHA`: `ambos recuperacao=inicio` (com o código e a etapa) e `ambos recuperacao=nova_tentativa`. Só a segunda falha é `FALHA`.
+    - Rejeitado: pôr um número de cada celular no anúncio para decidir quem conecta antes de conectar. Funcionaria como crachá no ar e ligaria os endereços aleatórios do Android entre si (Lei 4).
+15. **Resumo de todo teste em txt (09/11/2026):** `kryptos-resumo-<carimbo>.txt` em Downloads, com o resultado, o commit, os celulares e só as linhas FALHA e AVISO. É o arquivo para mandar primeiro; o zip vai quando for pedido. Também vai dentro do zip.
+    - No roteiro, linha FALHA derruba o resultado (`RESULTADO: FALHOU`): rodada sem nenhum cliente ou com dois clientes é FALHA.
+    - `-Autonomo -Ambos` roda tudo de uma vez. Uma etapa que falha não impede a seguinte, e o resultado final continua FALHOU.
 
 ## O que a pesquisa mostrou (08/11/2026)
 
@@ -111,7 +119,8 @@ Onde o Morse pode entrar: como **meio**, levando a carta já cifrada pelo Olm. P
    - Como ficou: seção "A sonda" abaixo.
 2. **Carta de verdade:** a carta Olm passa pelo BLE e entra no `receber_carta`. Chave avulsa entregue no encontro (decisão 4).
 3. **Quem é quem dentro da conexão:** como dois contatos se reconhecem sem anunciar identidade a quem está em volta. Desenho antes do código.
-4. **Tela:** o modo Direto na Central, ao lado do relay.
+4. **Tela:** o modo Direto na Central, ao lado do relay. Pela Lei 1 (09/11/2026), a pessoa escolhe com internet ou sem internet, e sem internet o app mostra até quantos km alcança, a partir do alcance medido (passo 1, `-Alcance`).
+5. **Lei 2 sem internet:** receber com o app fechado (conflito aberto 2 nas Leis), num assunto próprio.
 
 ## A sonda (passo 1)
 
@@ -383,8 +392,21 @@ Arquivos `kryptos-sonda-*-20261109-021400`, primeira coleta completa (medidas, l
   - No nível de log padrão, o Android não registra o intervalo de conexão: a explicação "um pacote por evento" continua sendo conta, não medida. O registro HCI do Android mostraria, mas só sai pelo bugreport, que carrega dados pessoais do celular. Ficou de fora.
   - A transcrição trazia "TerminatingError" do `pidof` de um processo que não existe nesses celulares (não era erro). Corrigido, e a calibração agora confere que a transcrição sai sem isso.
 
+## Resultado de 09/11/2026, segundo `-Ambos` (linha cruzada)
+
+Arquivos `kryptos-sonda-*-20261109-024817`, commit `92fca64`.
+
+- **8 de 10 com um cliente só.** Colisões: 6, sendo 4 antes do OLA e 2 pelo nonce. **O ramo do nonce foi confirmado no celular nas rodadas 6 e 7:** um lado marcou `colisao este=cliente` e o outro `este=servidor`.
+- **Rodada 8: nenhum cliente.** Os dois abriram conexão com uns 200 ms de diferença.
+  - O g15 registrou `Should not replace active handle:513 with new handle:515` e `Unable to create duplicate acl`. Ou seja, recusou o enlace aberto pelo Edge.
+  - Depois, o enlace aberto pelo próprio g15 caiu com reason 0x3e (`HCI_ERR_CONN_FAILED_ESTABLISHMENT`), e o cliente do g15 recebeu 133.
+  - O enlace do Edge continuou no rádio, mas o sistema do g15 não sabia dele. O Edge esperou 10 s pela descoberta de serviços, sem resposta (`TEMPO_ESGOTADO etapa=servicos`).
+- **Rodada 9: um cliente só, na prática.** Mesmo cruzamento, com 0x3e nos dois lados e 133 no g15. O Edge reconectou em 1,4 s, e o g15 serviu. O script marcou AVISO, porque só aceitava `ok` com `servidor`. Corrigido (decisão 15).
+- O número de cada celular no anúncio, que eu cheguei a recomendar para evitar o cruzamento, foi rejeitado (decisão 14).
+
 ## O que não resolve
 
+- **Linha cruzada (decisão 14):** o plano B recupera dentro da rodada, mas não impede o cruzamento. Quanto ele acontece no uso real, com os dois achando um ao outro em horas diferentes, não está medido. A espera da descoberta de serviços continua 10 s antes de o plano B entrar.
 - **Presença:** quem procura BLE por perto vê que há um Kryptos ali (o identificador de serviço é fixo). Não vê quem é.
 - **Alcance:** ainda não medido (os celulares estavam juntos). Velocidade só a 1 m.
 - **Caminhos de volta:** medidos a 1 m em 09/11/2026 (seção acima); em distância, não. O Android aceitou o segundo cliente GATT no mesmo enlace, mas a escrita não escapou do sentido lento, e o L2CAP só melhorou 29%. O sentido lento é do enlace aberto pelo g15: nenhum dos três resolve. Com dois celulares, continua sem dar para separar aparelho de papel.

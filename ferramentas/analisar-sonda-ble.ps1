@@ -172,7 +172,12 @@ try {
 
     # ---------- AMBOS ----------
     # desfecho=colisao (09/11/2026): os dois conectaram e o OLA desempatou; este= diz o papel que ficou.
-    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'ambos' } | Group-Object { "$($_.Aparelho) $($_.C['desfecho']) $($_.C['este'])" })) {
+    # recuperacao= (09/11/2026): linha cruzada; a sonda fechou e tentou de novo uma vez.
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'ambos' -and $_.C.ContainsKey('recuperacao') } | Group-Object { "$($_.Aparelho) $($_.C['recuperacao'])" })) {
+        $cods = (@($g.Group | Where-Object { $_.C.ContainsKey('codigo') } | Group-Object { $_.C['codigo'] } | ForEach-Object { "$($_.Name) $($_.Count)" })) -join ', '
+        $resultados.Add("OK    ambos $($g.Group[0].Aparelho): recuperacao=$($g.Group[0].C['recuperacao']) $($g.Count)x$(if ($cods) { " ($cods)" })")
+    }
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'ambos' -and -not $_.C.ContainsKey('recuperacao') } | Group-Object { "$($_.Aparelho) $($_.C['desfecho']) $($_.C['este'])" })) {
         $este = if ($g.Group[0].C.ContainsKey('este')) { " este=$($g.Group[0].C['este'])" } else { '' }
         $resultados.Add("OK    ambos $($g.Group[0].Aparelho): desfecho=$($g.Group[0].C['desfecho'])$este $($g.Count)x")
     }

@@ -223,8 +223,15 @@ function Rodada([string]$cli, [string]$texto, [string]$rotulo) {
 #   - antes do OLA: o cliente que ainda nao tinha mandado o OLA desiste (no log, o mesmo
 #     celular marca 'ambos desfecho=cliente' e depois 'ambos desfecho=servidor');
 #   - pelo nonce: os dois ja tinham mandado; 'ambos desfecho=colisao'.
+#   - linha cruzada (09/11/2026, rodadas 8 e 9): o Android de um recusa o enlace duplicado
+#     e um lado cai (0x3e, 133) ou espera os servicos a toa; a sonda fecha, fica de servidor
+#     e tenta de novo uma vez ('ambos recuperacao=inicio' e 'recuperacao=nova_tentativa').
+# Classificacao: um 'ok' e o outro 'servidor' = OK; um 'ok' e o outro 'falha' = AVISO (o
+# outro serviu, mas falhou como cliente); nenhum 'ok' = FALHA; dois 'ok' = FALHA (o
+# desempate nao segurou).
 function RodadasAmbos([string]$a, [string]$b, [int]$normais, [int]$forcadas, [int]$comAtraso = 0, [int]$repeticoes = 5) {
-    $boas = 0; $antesDoOla = 0; $peloNonce = 0; $total = $normais + $forcadas + $comAtraso
+    $boas = 0; $antesDoOla = 0; $peloNonce = 0; $cruzadas = 0; $recuperadas = 0; $nenhum = 0; $dois = 0; $avisos = 0
+    $total = $normais + $forcadas + $comAtraso
     for ($k = 1; $k -le $total; $k++) {
         $forcada = $k -gt $normais
         $atrasada = $k -gt ($normais + $forcadas)
@@ -241,6 +248,7 @@ function RodadasAmbos([string]$a, [string]$b, [int]$normais, [int]$forcadas, [in
         $linhasA = @(@(Medidas $a) | Select-Object -Skip $pa.Desde)
         $linhasB = @(@(Medidas $b) | Select-Object -Skip $pb.Desde)
         $nonce = @($linhasA + $linhasB | Where-Object { $_ -match 'sonda-ble ambos desfecho=colisao' }).Count -gt 0
+        $nRec = @($linhasA + $linhasB | Where-Object { $_ -match 'sonda-ble ambos recuperacao=inicio' }).Count
         $desistiu = $false
         foreach ($ls in @(, $linhasA) + @(, $linhasB)) {
             $iCli = -1; $iSrv = -1
@@ -250,19 +258,21 @@ function RodadasAmbos([string]$a, [string]$b, [int]$normais, [int]$forcadas, [in
             }
             if ($iCli -ge 0 -and $iSrv -gt $iCli) { $desistiu = $true }
         }
-        $col = if ($nonce) { 'pelo nonce' } elseif ($desistiu) { 'antes do OLA' } else { 'nao' }
-        if ($nonce) { $peloNonce++ } elseif ($desistiu) { $antesDoOla++ }
-        $d = @($fa.Desfecho, $fb.Desfecho) | Sort-Object
-        $umCliente = ($d[0] -eq 'ok' -and $d[1] -eq 'servidor')
-        if ($umCliente) { $boas++ }
-        $marca = if ($umCliente) { 'OK   ' } else { 'AVISO' }
+        $col = if ($nonce) { 'pelo nonce' } elseif ($nRec -gt 0) { "linha cruzada ($nRec recuperacao)" } elseif ($desistiu) { 'antes do OLA' } else { 'nao' }
+        if ($nonce) { $peloNonce++ } elseif ($nRec -gt 0) { $cruzadas++ } elseif ($desistiu) { $antesDoOla++ }
+        $nOk = @(@($fa.Desfecho, $fb.Desfecho) | Where-Object { $_ -eq 'ok' }).Count
+        $outro = if ($fa.Desfecho -eq 'ok') { $fb } else { $fa }
+        if ($nOk -eq 2) { $marca = 'FALHA'; $dois++; $nota = '; DOIS CLIENTES (o desempate nao segurou)' }
+        elseif ($nOk -eq 0) { $marca = 'FALHA'; $nenhum++; $nota = '; NENHUM CLIENTE (nada foi entregue)' }
+        elseif ($outro.Desfecho -eq 'servidor') { $marca = 'OK   '; $boas++; $nota = '' }
+        else { $marca = 'AVISO'; $avisos++; $nota = "; um cliente so, mas o outro terminou em $($outro.Desfecho) em vez de servidor" }
+        if ($nRec -gt 0 -and $nOk -eq 1) { $recuperadas++ }
         $tipo = if ($atrasada) { 'espera 0 e OLA segurado 2 s' } elseif ($forcada) { 'espera 0 (colisao provocada)' } else { 'espera aleatoria' }
-        $dois = if ($fa.Desfecho -eq 'ok' -and $fb.Desfecho -eq 'ok') { '; DOIS CLIENTES (o desempate nao segurou)' } else { '' }
-        $resultados.Add("$marca AMBOS $k, $tipo`: $(Nome $a)=$($fa.Desfecho)$(if ($fa.Codigo) { " $($fa.Codigo)" }), $(Nome $b)=$($fb.Desfecho)$(if ($fb.Codigo) { " $($fb.Codigo)" }); colisao: $col; soltos com $msSoltar ms de diferenca$dois")
+        $resultados.Add("$marca AMBOS $k, $tipo`: $(Nome $a)=$($fa.Desfecho)$(if ($fa.Codigo) { " $($fa.Codigo)" }), $(Nome $b)=$($fb.Desfecho)$(if ($fb.Codigo) { " $($fb.Codigo)" }); colisao: $col; soltos com $msSoltar ms de diferenca$nota")
         Write-Host "   AMBOS $k ($tipo): $($fa.Desfecho) / $($fb.Desfecho), colisao: $col"
     }
-    $marca = if ($boas -eq $total) { 'OK   ' } else { 'AVISO' }
-    $resultados.Add("$marca AMBOS: $boas de $total com um cliente so; colisoes: $($antesDoOla + $peloNonce) ($antesDoOla antes do OLA, $peloNonce pelo nonce)")
+    $marca = if ($nenhum -gt 0 -or $dois -gt 0) { 'FALHA' } elseif ($boas -eq $total) { 'OK   ' } else { 'AVISO' }
+    $resultados.Add("$marca AMBOS: $boas de $total com um cliente so; $avisos com aviso; $nenhum sem nenhum cliente; $dois com dois clientes; colisoes: $($antesDoOla + $peloNonce + $cruzadas) ($antesDoOla antes do OLA, $peloNonce pelo nonce, $cruzadas linha cruzada; $recuperadas recuperada(s))")
 }
 
 $ok = $false
@@ -414,6 +424,9 @@ try {
     foreach ($linha in $resultados) { Write-Host $linha }
 }
 
-if ($ok) { Write-Host 'RESULTADO: OK'; exit 0 }
-Write-Host 'RESULTADO: FALHOU'
+# Linha FALHA (rodada sem cliente, dois clientes) tambem derruba o resultado: um
+# 'RESULTADO: OK' depois de uma FALHA ja enganou uma vez (regra 4.3).
+$falhas = @($resultados | Where-Object { $_ -like 'FALHA*' }).Count
+if ($ok -and $falhas -eq 0) { Write-Host 'RESULTADO: OK'; exit 0 }
+Write-Host "RESULTADO: FALHOU ($falhas linha(s) FALHA)"
 exit 1

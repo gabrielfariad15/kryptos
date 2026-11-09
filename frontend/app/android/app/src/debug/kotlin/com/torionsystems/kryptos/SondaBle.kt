@@ -120,6 +120,10 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         const val PROCURAS_POR_JANELA = 5
         const val JANELA_PROCURAS_MS = 30_000L
         const val ESPERA_AMBOS_MAX_MS = 1_500
+        // Plano B da linha cruzada (09/11/2026): depois da falha, fica só de servidor por esta
+        // janela antes de tentar de novo. Estimo: o outro, quando sobra, conecta em menos de
+        // 1 s (ola aceito em 97 a 2.731 ms nas rodadas de 09/11); 3 s cobrem com folga.
+        const val JANELA_RECUPERACAO_MS = 3_000L
         const val TENTATIVAS_OCUPADO_MAX = 5_000
         const val ARQUIVO = "sonda-ble.txt"
         const val ARQUIVO_MAX_BYTES = 2L * 1024 * 1024
@@ -1236,6 +1240,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private val procuras = ArrayDeque<Long>()
     private var idasOk = 0
     private var voltasOk = 0
+    // AMBOS: uma recuperação por rodada, e só antes do OLA aceito (ver recuperarAmbos).
+    private var recuperacaoUsada = false
+    private var olaAceito = false
     private val vistosIda = mutableListOf<String>()
     private val vistosVolta = mutableListOf<String>()
 
@@ -1297,6 +1304,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         rodada++
         cliente = cfg
         idasOk = 0; voltasOk = 0
+        recuperacaoUsada = false; olaAceito = false
         vistosIda.clear(); vistosVolta.clear()
         ocupado(true)
         val filtro = ScanFilter.Builder().setServiceUuid(ParcelUuid(UUID_SERVICO)).build()
@@ -1499,6 +1507,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             pararTransferencia()
             when (r) {
                 QuadroSonda.OLA_ACEITO -> {
+                    olaAceito = true
                     medida("ola", "${campos(cfg)} resultado=aceito ms=${SystemClock.elapsedRealtime() - comeco}")
                     when (cfg.caminho) {
                         QuadroSonda.CAMINHO_ESCRITA -> abrirServidorVolta(g, cfg)
@@ -1812,10 +1821,50 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private fun falharCliente(codigo: String, extra: String = "") {
         val cfg = cliente
         if (cfg == null) { falha(codigo, extra); return }
+        if (podeRecuperar(cfg, codigo)) { recuperarAmbos(cfg, codigo, extra); return }
         desfechoCliente = "falha"
         codigoDesfecho = codigo
         falha(codigo, "${campos(cfg)}${if (extra.isEmpty()) "" else " $extra"}")
         pararCliente()
+    }
+
+    // Linha cruzada no AMBOS (09/11/2026): os dois abrem conexão no mesmo instante, o
+    // Android de um deles recusa o enlace duplicado ("Unable to create duplicate acl") e um
+    // lado cai com 0x3e (133) ou espera a descoberta de serviços num enlace que o outro já
+    // descartou. Antes do OLA aceito, isso não é falha da rodada: fecha a conexão, fica só de
+    // servidor por JANELA_RECUPERACAO_MS mais uma espera sorteada e, se ninguém conectou
+    // nele (o tratarOla para este cliente quando o outro chega), tenta de novo uma vez.
+    private fun podeRecuperar(cfg: Config, codigo: String): Boolean =
+        cfg.modo == "AMBOS" && !recuperacaoUsada && !olaAceito && idasOk == 0 &&
+            codigo in setOf("CONEXAO_CAIU", "TEMPO_ESGOTADO", "SERVICOS", "SERVICOS_RECUSADO", "CONEXAO_RECUSADA")
+
+    private fun recuperarAmbos(cfg: Config, codigo: String, extra: String) {
+        recuperacaoUsada = true
+        val d = dispositivoAlvo
+        h.removeCallbacks(tempoEsgotado)
+        pararTransferencia()
+        aoEvento = null
+        val g = gatt
+        gatt = null
+        entradaCliente = null
+        meuNonce = null
+        fecharVoltaCliente()
+        try {
+            g?.disconnect()
+            g?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "fechar cliente na recuperacao: ${e.javaClass.simpleName}")
+        }
+        val espera = JANELA_RECUPERACAO_MS + sorteio.nextInt(ESPERA_AMBOS_MAX_MS + 1)
+        etapa = "recuperacao"
+        medida("ambos", "recuperacao=inicio rodada=$rodada codigo=$codigo${if (extra.isEmpty()) "" else " $extra"} espera_ms=$espera")
+        h.postDelayed({
+            // Virou servidor no meio da espera: o tratarOla já parou este cliente.
+            if (cliente !== cfg || gatt != null) return@postDelayed
+            if (d == null) { falharCliente(codigo, "$extra recuperacao=sem_alvo"); return@postDelayed }
+            medida("ambos", "recuperacao=nova_tentativa rodada=$rodada")
+            conectar(cfg, d)
+        }, espera)
     }
 
     private fun pararCliente() {
