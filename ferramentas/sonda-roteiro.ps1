@@ -18,9 +18,10 @@
 #             (NAO_ACHOU_30S), recusa comando com o app fora da frente e aceita de volta.
 #   UmMetro   dois celulares a 1 m: calibra e mede os tres caminhos de volta nos dois
 #             sentidos, AMBOS 3 vezes e o ciclo de vida (botao de inicio no meio das idas).
-#   Ambos     dois celulares a 1 m: uma calibracao e o AMBOS, 5 vezes com a espera aleatoria normal e
-#             5 com espera 0 (os dois conectam juntos: provoca a colisao e testa o
-#             desempate pelo OLA).
+#   Ambos     dois celulares a 1 m: uma calibracao e 10 rodadas de AMBOS (2 idas e voltas
+#             cada): 3 com a espera aleatoria normal, 3 com espera 0 (os dois conectam
+#             juntos) e 4 com espera 0 e o OLA segurado 2 s no servidor (os dois clientes
+#             mandam o OLA antes de qualquer decisao: desempate pela comparacao do nonce).
 #   Alcance   dois celulares: o primeiro anuncia, o segundo calibra (sem -SemCalibrar) e
 #             recebe o roteiro de distancias; depois a pessoa tira os cabos e toca PROXIMO
 #             PONTO em cada distancia.
@@ -215,15 +216,21 @@ function Rodada([string]$cli, [string]$texto, [string]$rotulo) {
 }
 
 # Rodadas de AMBOS: os dois recebem o comando e so depois sao soltos, um logo depois do
-# outro. Com espera_ms=0 nenhum espera antes de conectar: os dois conectam juntos e o
-# desempate e o do OLA. Esperado em todas: um 'ok' (o cliente que seguiu) e um 'servidor'.
-function RodadasAmbos([string]$a, [string]$b, [int]$normais, [int]$forcadas) {
-    $boas = 0; $colisoes = 0; $total = $normais + $forcadas
+# outro. Com espera_ms=0 nenhum espera antes de conectar: os dois conectam juntos. Com
+# atraso_ola_ms, o servidor segura o OLA e os dois clientes chegam a se apresentar.
+# Esperado em todas: um 'ok' (o cliente que seguiu) e um 'servidor'.
+# Colisao (09/11/2026): os dois abriram conexao um no outro. Dois jeitos de resolver:
+#   - antes do OLA: o cliente que ainda nao tinha mandado o OLA desiste (no log, o mesmo
+#     celular marca 'ambos desfecho=cliente' e depois 'ambos desfecho=servidor');
+#   - pelo nonce: os dois ja tinham mandado; 'ambos desfecho=colisao'.
+function RodadasAmbos([string]$a, [string]$b, [int]$normais, [int]$forcadas, [int]$comAtraso = 0, [int]$repeticoes = 5) {
+    $boas = 0; $antesDoOla = 0; $peloNonce = 0; $total = $normais + $forcadas + $comAtraso
     for ($k = 1; $k -le $total; $k++) {
         $forcada = $k -gt $normais
+        $atrasada = $k -gt ($normais + $forcadas)
         PararTodos @($a, $b)
         Pausa 6500
-        $texto = 'acao=ambos phy=1M prioridade=PADRAO volta=NOTIFICACAO distancia=1' + $(if ($forcada) { ' espera_ms=0' } else { '' })
+        $texto = "acao=ambos phy=1M prioridade=PADRAO volta=NOTIFICACAO distancia=1 repeticoes=$repeticoes" + $(if ($forcada) { ' espera_ms=0' } else { '' }) + $(if ($atrasada) { ' atraso_ola_ms=2000' } else { '' })
         $pa = Mandar $a $texto -SemSoltar
         $pb = Mandar $b $texto -SemSoltar
         $t0 = Get-Date
@@ -231,20 +238,31 @@ function RodadasAmbos([string]$a, [string]$b, [int]$normais, [int]$forcadas) {
         $msSoltar = [math]::Round(((Get-Date) - $t0).TotalMilliseconds)
         $fa = EsperarFim $pa 420
         $fb = EsperarFim $pb 420
-        $col = @(@(Medidas $a) | Select-Object -Skip $pa.Desde | Where-Object { $_ -match 'sonda-ble ambos desfecho=colisao' }).Count +
-            @(@(Medidas $b) | Select-Object -Skip $pb.Desde | Where-Object { $_ -match 'sonda-ble ambos desfecho=colisao' }).Count
-        if ($col -gt 0) { $colisoes++ }
+        $linhasA = @(@(Medidas $a) | Select-Object -Skip $pa.Desde)
+        $linhasB = @(@(Medidas $b) | Select-Object -Skip $pb.Desde)
+        $nonce = @($linhasA + $linhasB | Where-Object { $_ -match 'sonda-ble ambos desfecho=colisao' }).Count -gt 0
+        $desistiu = $false
+        foreach ($ls in @(, $linhasA) + @(, $linhasB)) {
+            $iCli = -1; $iSrv = -1
+            for ($i = 0; $i -lt $ls.Count; $i++) {
+                if ($ls[$i] -match 'sonda-ble ambos desfecho=cliente') { $iCli = $i }
+                if ($ls[$i] -match 'sonda-ble ambos desfecho=servidor' -and $iCli -ge 0) { $iSrv = $i }
+            }
+            if ($iCli -ge 0 -and $iSrv -gt $iCli) { $desistiu = $true }
+        }
+        $col = if ($nonce) { 'pelo nonce' } elseif ($desistiu) { 'antes do OLA' } else { 'nao' }
+        if ($nonce) { $peloNonce++ } elseif ($desistiu) { $antesDoOla++ }
         $d = @($fa.Desfecho, $fb.Desfecho) | Sort-Object
         $umCliente = ($d[0] -eq 'ok' -and $d[1] -eq 'servidor')
         if ($umCliente) { $boas++ }
         $marca = if ($umCliente) { 'OK   ' } else { 'AVISO' }
-        $tipo = if ($forcada) { 'espera 0 (colisao provocada)' } else { 'espera aleatoria' }
+        $tipo = if ($atrasada) { 'espera 0 e OLA segurado 2 s' } elseif ($forcada) { 'espera 0 (colisao provocada)' } else { 'espera aleatoria' }
         $dois = if ($fa.Desfecho -eq 'ok' -and $fb.Desfecho -eq 'ok') { '; DOIS CLIENTES (o desempate nao segurou)' } else { '' }
-        $resultados.Add("$marca AMBOS $k, $tipo`: $(Nome $a)=$($fa.Desfecho)$(if ($fa.Codigo) { " $($fa.Codigo)" }), $(Nome $b)=$($fb.Desfecho)$(if ($fb.Codigo) { " $($fb.Codigo)" }); colisao vista: $(if ($col -gt 0) { 'sim' } else { 'nao' }); soltos com $msSoltar ms de diferenca$dois")
-        Write-Host "   AMBOS $k ($tipo): $($fa.Desfecho) / $($fb.Desfecho), colisao $(if ($col -gt 0) { 'sim' } else { 'nao' })"
+        $resultados.Add("$marca AMBOS $k, $tipo`: $(Nome $a)=$($fa.Desfecho)$(if ($fa.Codigo) { " $($fa.Codigo)" }), $(Nome $b)=$($fb.Desfecho)$(if ($fb.Codigo) { " $($fb.Codigo)" }); colisao: $col; soltos com $msSoltar ms de diferenca$dois")
+        Write-Host "   AMBOS $k ($tipo): $($fa.Desfecho) / $($fb.Desfecho), colisao: $col"
     }
     $marca = if ($boas -eq $total) { 'OK   ' } else { 'AVISO' }
-    $resultados.Add("$marca AMBOS: $boas de $total com um cliente so; $colisoes com colisao resolvida ou tentada no OLA")
+    $resultados.Add("$marca AMBOS: $boas de $total com um cliente so; colisoes: $($antesDoOla + $peloNonce) ($antesDoOla antes do OLA, $peloNonce pelo nonce)")
 }
 
 $ok = $false
@@ -367,8 +385,8 @@ try {
         Anunciar $Seriais[0] | Out-Null
         $r = Rodada $Seriais[1] 'acao=calibrar phy=1M prioridade=PADRAO volta=NOTIFICACAO' '1 m, antes do AMBOS'
         if ($r.Desfecho -ne 'calibracao_OK') { throw "a calibracao antes do AMBOS nao deu OK ($($r.Desfecho) $($r.Codigo))" }
-        Write-Host '.. AMBOS: 5 com espera aleatoria e 5 com espera 0 (colisao provocada)'
-        RodadasAmbos $Seriais[0] $Seriais[1] 5 5
+        Write-Host '.. AMBOS: 3 com espera aleatoria, 3 com espera 0 e 4 com espera 0 e o OLA segurado'
+        RodadasAmbos $Seriais[0] $Seriais[1] 3 3 4 2
         PararTodos @($Seriais[0], $Seriais[1])
     }
 

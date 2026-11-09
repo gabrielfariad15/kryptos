@@ -227,8 +227,14 @@ function ColherLogcat($a, [string]$modeloArq) {
     # Processos que interessam: o app (pid ao abrir e agora) e o servico de Bluetooth.
     $pids = New-Object 'System.Collections.Generic.HashSet[string]'
     if ($c) { foreach ($p in $c.Pids) { [void]$pids.Add($p) } }
+    # pidof sai com 1 quando o processo nao existe (com.google.android.bluetooth nos dois
+    # celulares de 09/11/2026): nao e erro, entao sem Rodar, que lancaria e sujaria a
+    # transcricao com TerminatingError.
     foreach ($proc in @($Pacote, 'com.android.bluetooth', 'com.google.android.bluetooth')) {
-        try { foreach ($p in @((Rodar $adb @('-s', $s, 'shell', 'pidof', $proc)) -split '\s+')) { if ($p -match '^\d+$') { [void]$pids.Add($p) } } } catch { $null = $_ }
+        $antes = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { $saidaPid = @(& $adb -s $s shell pidof $proc 2>$null) } finally { $ErrorActionPreference = $antes }
+        foreach ($p in @(($saidaPid -join ' ') -split '\s+')) { if ($p -match '^\d+$') { [void]$pids.Add($p) } }
     }
     $saida = New-Object System.Collections.Generic.List[string]
     foreach ($l in $linhas) {

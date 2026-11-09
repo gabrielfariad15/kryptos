@@ -149,7 +149,7 @@ Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige And
 
 - **`-Conferir`** (um celular basta): o comando chega; o L2CAP abre escuta; anuncia; recusa comando errado; para; carrega e cancela o roteiro; procura sozinho e dá `NAO_ACHOU_30S`; recusa com o app fora da frente e aceita de volta.
 - **`-Autonomo`** (os dois no cabo, a 1 m): calibra os três caminhos de volta e mede 1M PADRAO, 2M ALTA nos três caminhos e Coded ALTA, nos dois sentidos; AMBOS 3 vezes, os dois soltos juntos; ciclo de vida com o botão de início no meio das idas. Estimo de 15 a 20 min.
-- **`-Ambos`** (os dois no cabo, a 1 m): uma calibração e 10 rodadas de AMBOS: 5 com a espera aleatória e 5 com espera 0, que faz os dois conectarem juntos e testa o desempate (decisão 12). Esperado em todas: um `ok` e um `servidor`. Dois `ok` saem como `DOIS CLIENTES`.
+- **`-Ambos`** (os dois no cabo, a 1 m): uma calibração e 10 rodadas de AMBOS de 2 idas e voltas: 3 com a espera aleatória, 3 com espera 0 (os dois conectam juntos) e 4 com espera 0 e o OLA segurado 2 s (os dois clientes se apresentam, e o desempate é pela comparação do nonce) (decisão 12). Esperado em todas: um `ok` e um `servidor`. Dois `ok` saem como `DOIS CLIENTES`.
 - **`-Alcance`**: o primeiro celular anuncia; o segundo calibra a 1 m (sem `-Autonomo`) e recebe o roteiro (5, 10, 15, 20 e 30 m; 1M PADRAO e Coded ALTA; 3 repetições). Sem cabo, em cada ponto a pessoa toca **PRÓXIMO PONTO** no celular que procura. O roteiro para sozinho no ponto em que nenhuma combinação achou o outro (`roteiro-fim motivo=SEM_ALCANCE_A_<d>M`).
 
 **Variáveis**, escolhidas na tela, uma por rodada: PHY (1M, 2M, CODED), prioridade (PADRAO, ALTA), caminho de volta (NOTIFICACAO, ESCRITA, L2CAP) e a distância declarada (1, 5, 10, 15, 20, 30 m). Quem escolhe é o celular que procura.
@@ -363,6 +363,25 @@ Arquivos `kryptos-sonda-*-20261109-003458.txt`, sem tocar na tela, os dois no Wi
 - **Coded, alta:** com o Edge conectando, 5 de 5 (ida 7,4 s, volta 2,6 s; a conexão levou 5,7 s). Com o g15 conectando, a volta esgotou os 30 s.
 - **AMBOS:** 2 de 3. Nas duas boas, o Edge ficou de cliente. Na terceira, os dois conectaram ao mesmo tempo (`duas_conexoes`). Cada servidor recusou a conexão do outro como "outro cliente", a notificação falhou com status 129 e as duas rodadas esgotaram o tempo. O desempate por espera aleatória não cobre a colisão.
 - **Ciclo de vida:** não testado nesta rodada. A procura logo depois do AMBOS caiu com 133 em 0,4 s, e o script esperou a primeira ida em vez de ver o fim. Defeito do script, corrigido no mesmo dia: agora reconhece o fim da rodada, tenta de novo uma vez e, se repetir, dá AVISO (`ciclo de vida sem teste`). Calibrado nos dois casos, 133 uma vez e 133 sempre.
+
+## Resultado de 09/11/2026, `-Ambos` (desempate pelo OLA)
+
+Arquivos `kryptos-sonda-*-20261109-021400`, primeira coleta completa (medidas, logcat mascarado, análise, transcrição).
+
+- **10 de 10 rodadas com um cliente só,** incluindo as 5 com espera 0. Antes do OLA, a colisão derrubava os dois.
+- **A colisão aconteceu de verdade em 8 das 10.** O contador do script dizia "nenhuma" porque só contava `desfecho=colisao`. O logcat mostra o que houve, por exemplo na rodada 6 do Edge:
+  - o Edge começou a conectar no g15 pelo endereço do anúncio (`bt-20`);
+  - o g15 conectou no Edge com outro endereço (`bt-13`);
+  - ficaram dois enlaces físicos ao mesmo tempo (handles 513 e 512);
+  - o OLA do g15 chegou quando o cliente do Edge ainda pedia o MTU, e o Edge desistiu (`ambos desfecho=cliente` e logo `desfecho=servidor`).
+  - É a confirmação, no log do Android, de que o endereço não serve para desempatar.
+- **Todas as 8 se resolveram pelo ramo "quem ainda não mandou o OLA desiste".** A comparação dos nonces não chegou a rodar no celular: o g15 acha e conecta antes, e o OLA dele chega primeiro. Para testar esse ramo, o comando `ambos` ganhou `atraso_ola_ms` (o servidor segura o OLA, e os dois clientes chegam a se apresentar). O contador agora separa "antes do OLA" de "pelo nonce".
+- **Quem ganha a corrida:** o g15 ficou de cliente em 9 das 10. Com ele conectando, o Edge manda no sentido lento: volta de 19,2 s em 1M padrão, contra 1,16 s com o Edge conectando.
+- **Coleta:**
+  - logcat com 2.627 (Edge) e 2.811 (g15) linhas do app e do serviço de Bluetooth, de 37 mil e 48 mil no total;
+  - 30 e 44 endereços mascarados; nenhum endereço nem nome sobrou.
+  - No nível de log padrão, o Android não registra o intervalo de conexão: a explicação "um pacote por evento" continua sendo conta, não medida. O registro HCI do Android mostraria, mas só sai pelo bugreport, que carrega dados pessoais do celular. Ficou de fora.
+  - A transcrição trazia "TerminatingError" do `pidof` de um processo que não existe nesses celulares (não era erro). Corrigido, e a calibração agora confere que a transcrição sai sem isso.
 
 ## O que não resolve
 

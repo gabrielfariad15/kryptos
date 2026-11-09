@@ -303,6 +303,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 comandoCliente = id
                 desfechoCliente = "parou"
                 codigoDesfecho = ""
+                atrasoOla = if (cfg.modo == "AMBOS") cfg.atrasoOlaMs else 0
                 if (cfg.modo == "AMBOS") iniciarServidor("AMBOS")
                 iniciarCliente(cfg)
                 // Recusado antes de começar (PROCURA_DEMAIS, Bluetooth desligado...): a
@@ -326,8 +327,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             calibrar = calibrar,
             volta = c["volta"] ?: "NOTIFICACAO",
             esperaAmbosMs = c["espera_ms"]?.toIntOrNull() ?: ESPERA_AMBOS_MAX_MS,
+            atrasoOlaMs = c["atraso_ola_ms"]?.toIntOrNull() ?: 0,
         )
-        if (cfg.esperaAmbosMs !in 0..5_000) return null
+        if (cfg.esperaAmbosMs !in 0..5_000 || cfg.atrasoOlaMs !in 0..5_000) return null
         // A calibração depende de 3 rodadas: sabotagem na 1ª e na 2ª, nada na 3ª.
         if (calibrar && cfg.repeticoes < 3) return null
         return if (configValida(cfg)) cfg else null
@@ -815,6 +817,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     }
 
     /** O OLA decide quem é o cliente deste servidor (ver decidirOla). */
+    // Atraso do OLA (só teste do desempate, comando ambos com atraso_ola_ms).
+    private var atrasoOla = 0
+
     private fun tratarOla(device: BluetoothDevice, q: ByteArray) {
         val ola = QuadroSonda.lerOla(q)
         if (ola == null) { falha("QUADRO_INVALIDO", "papel=servidor tipo=ola"); return }
@@ -851,7 +856,11 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         notificar(listOf(QuadroSonda.olaResposta(codigo)), envioDeVolta = false, para = device)
 
     private fun entradaDoServidor(device: BluetoothDevice, q: ByteArray) {
-        if (QuadroSonda.tipo(q) == QuadroSonda.TIPO_OLA) { tratarOla(device, q); return }
+        if (QuadroSonda.tipo(q) == QuadroSonda.TIPO_OLA) {
+            if (atrasoOla > 0) h.postDelayed({ if (servidor != null) tratarOla(device, q) }, atrasoOla.toLong())
+            else tratarOla(device, q)
+            return
+        }
         if (device != clienteDoServidor) {
             // Quadro de quem não se apresentou (ou foi recusado): fora. Avisa uma vez.
             if (semOlaAvisado.add(device)) falha("QUADRO_SEM_OLA", "papel=servidor")
@@ -1196,6 +1205,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         val volta: String,
         // Espera aleatória máxima antes de conectar no AMBOS; 0 provoca a colisão (teste do desempate).
         val esperaAmbosMs: Int = ESPERA_AMBOS_MAX_MS,
+        // Só para testar o desempate: o servidor segura o OLA recebido por este tempo, e os
+        // dois clientes chegam a mandar o OLA antes de qualquer decisão (comparação de nonce).
+        val atrasoOlaMs: Int = 0,
     ) {
         val caminho: Int get() = QuadroSonda.caminhoDoNome(volta) ?: QuadroSonda.CAMINHO_NOTIFICACAO
     }
@@ -1242,7 +1254,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
 
     private fun campos(c: Config) =
         "rodada=$rodada modo=${c.modo} distancia=${c.distancia} phy=${c.phy} prioridade=${c.prioridade} " +
-            "volta=${c.volta} calibrar=${sn(c.calibrar)}${if (c.modo == "AMBOS") " espera_ms=${c.esperaAmbosMs}" else ""}"
+            "volta=${c.volta} calibrar=${sn(c.calibrar)}${if (c.modo == "AMBOS") " espera_ms=${c.esperaAmbosMs}" else ""}" +
+            if (c.atrasoOlaMs > 0) " atraso_ola_ms=${c.atrasoOlaMs}" else ""
 
     /** Espera um evento. O tratador devolve true quando consumiu; false, continua esperando. */
     private fun esperar(nome: String, ms: Long, tratar: (Ev) -> Boolean) {
@@ -1836,6 +1849,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
 
     /** Para tudo: procura, anúncio, conexão e servidor. Também quando o app sai da frente. */
     fun parar(motivo: String) {
+        atrasoOla = 0
         // O roteiro sai antes do cliente, para a rodada interrompida não puxar a próxima.
         if (roteiro != null) fimRoteiro(motivo)
         val haviaAlgo = cliente != null || servidor != null
