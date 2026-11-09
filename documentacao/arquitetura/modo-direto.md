@@ -38,6 +38,22 @@ Decidido em 08/11/2026. Exigência de origem: `DECISOES-FASE-0.md` (seção 8) e
     - nunca em segundo plano: `ACCESS_BACKGROUND_LOCATION` continua proibida.
     Hoje o `instalar-no-celular.ps1` recusa o app que tenha qualquer permissão de localização. Quando o Local for construído, essa conferência muda para: localização declarada só com o Local, não concedida na instalação, e a de segundo plano continua recusada.
 
+## Decisões de 09/11/2026
+
+12. **Desempate da colisão no AMBOS: pelo OLA, com um nonce por conexão.** O primeiro quadro do cliente, depois de ligar a notificação, é um OLA com um número aleatório de 64 bits, novo a cada conexão, que não identifica ninguém.
+    - O servidor não escolhe mais o cliente na conexão: escolhe no OLA. Se este aparelho também tem cliente ativo, compara o nonce do outro com o do próprio cliente (`QuadroSonda.decidirOla`, comparação sem sinal).
+    - A mesma regra nos dois lados faz um aceitar e parar o próprio cliente, e o outro recusar (`OLA_RECUSADO_COLISAO`). Empate (1 em 2^64): os dois recusam e a rodada recomeça.
+    - Quem ainda não mandou o OLA desiste.
+    - **Por que não pelo endereço:** os celulares trocam o endereço Bluetooth por privacidade. Na colisão de 09/11, a conexão que chegou do outro veio com um endereço diferente do da conexão que este abriu. A regra antiga ("um cliente por vez, recusa o outro") derrubou o cliente dos dois.
+    - O bitchat resolve conexão dupla pela identidade fixa do aparelho. O Kryptos não pode, porque o anúncio não diz quem é. O nonce é a versão sem identidade, e o passo 3 ("quem é quem") vai substituir ou absorver isso.
+13. **Coleta completa em todo teste da sonda pelo script:**
+    - as medidas;
+    - o logcat do app e do serviço de Bluetooth, com endereços trocados por apelidos (`bt-1`...) e nomes por `<oculto>`;
+    - a análise;
+    - a transcrição da janela, sem o cabeçalho do PowerShell;
+    - bateria e temperatura no começo e no fim;
+    - tudo num zip. As medidas vêm mesmo quando o roteiro falha.
+
 ## O que a pesquisa mostrou (08/11/2026)
 
 - **bitchat** (malha BLE, Android e iPhone): cada aparelho age nos dois papéis, e a mensagem grande vai em pedaços. A Trail of Bits considerou legítimas as falhas apontadas logo no lançamento (julho de 2025), e uma auditoria posterior achou injeção de mensagem não autenticada na malha (corrigida em 28/01/2026). Lição para o Kryptos: o transporte não autentica nada; quem decide se a carta vale é o núcleo, pelo Olm.
@@ -133,6 +149,7 @@ Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige And
 
 - **`-Conferir`** (um celular basta): o comando chega; o L2CAP abre escuta; anuncia; recusa comando errado; para; carrega e cancela o roteiro; procura sozinho e dá `NAO_ACHOU_30S`; recusa com o app fora da frente e aceita de volta.
 - **`-Autonomo`** (os dois no cabo, a 1 m): calibra os três caminhos de volta e mede 1M PADRAO, 2M ALTA nos três caminhos e Coded ALTA, nos dois sentidos; AMBOS 3 vezes, os dois soltos juntos; ciclo de vida com o botão de início no meio das idas. Estimo de 15 a 20 min.
+- **`-Ambos`** (os dois no cabo, a 1 m): uma calibração e 10 rodadas de AMBOS: 5 com a espera aleatória e 5 com espera 0, que faz os dois conectarem juntos e testa o desempate (decisão 12). Esperado em todas: um `ok` e um `servidor`. Dois `ok` saem como `DOIS CLIENTES`.
 - **`-Alcance`**: o primeiro celular anuncia; o segundo calibra a 1 m (sem `-Autonomo`) e recebe o roteiro (5, 10, 15, 20 e 30 m; 1M PADRAO e Coded ALTA; 3 repetições). Sem cabo, em cada ponto a pessoa toca **PRÓXIMO PONTO** no celular que procura. O roteiro para sozinho no ponto em que nenhuma combinação achou o outro (`roteiro-fim motivo=SEM_ALCANCE_A_<d>M`).
 
 **Variáveis**, escolhidas na tela, uma por rodada: PHY (1M, 2M, CODED), prioridade (PADRAO, ALTA), caminho de volta (NOTIFICACAO, ESCRITA, L2CAP) e a distância declarada (1, 5, 10, 15, 20, 30 m). Quem escolhe é o celular que procura.
@@ -150,11 +167,15 @@ Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige And
 | `ida`, `volta` | n, bytes, pedacos, ms, kbps, resultado, recebidos, ms_receptor, ocupado, rssi (só na ida) |
 | `servidor-recebeu`, `servidor-enviou` | o mesmo, do lado do servidor; `servidor-enviou` leva o caminho (no L2CAP, ocupado e mtu saem `-`) |
 | `rodada-fim`, `calibracao`, `ambos`, `parou` | o desfecho de cada rodada; `calibracao` leva volta (o caminho) e as listas ida e voltas |
+| `ola` | (cliente) resultado do OLA e ms até a resposta |
+| `ambos` | desfecho (`cliente`, `servidor`, `colisao`) e, na colisão, `este=` o papel que ficou |
 | `comando`, `comando-fim` | id e acao; desfecho (`ok`, `calibracao_OK`, `servidor`, `falha`, `nao_comecou`, `recusado`) e o código |
 | `l2cap-teste` | resultado, psm (um aparelho só, `-Conferir`) |
 | `roteiro`, `roteiro-ponto`, `roteiro-fim` | distâncias e combinações carregadas; começo e fim de cada ponto; motivo do fim |
 
 Códigos de FALHA: `ANDROID_ANTIGO`, `SEM_PERMISSAO`, `SEM_BLUETOOTH`, `BLUETOOTH_DESLIGADO`, `PROCURA_DEMAIS`, `NAO_ACHOU_30S`, `CONEXAO_CAIU` (com o status), `TEMPO_ESGOTADO` (com a etapa), `MTU`, `ESCRITA*`, `NOTIFICACAO*`, `ANUNCIO_LEGADO`, `ANUNCIO_CODED`, `QUADRO_INVALIDO`, `APP_SAIU_DA_FRENTE`, `PARADA_PEDIDA`.
+
+Do OLA: `OLA_RECUSADO` (servidor já ocupado), `QUADRO_SEM_OLA` (quadro de quem não se apresentou), `SEM_CLIENTE`.
 
 Dos comandos: `COMANDO_INVALIDO` (com o motivo), `COMANDO_FORA_DA_FRENTE`, `CLIENTE_JA_ATIVO`, `L2CAP_ESCUTA`.
 
@@ -185,6 +206,13 @@ Dos caminhos de volta: `VOLTA_PREPARAR` (com o motivo, do lado do servidor), `VO
 - **Defeito que o celular achou e a calibração deixou passar (08/11/2026):** a conferência do arquivo zerado usava `run-as ... sh -c "if ...; then ...; fi"`. O `adb shell` junta os argumentos numa linha só, e o shell do celular lê essa linha de novo: o `;` quebrou o comando (`syntax error: unexpected 'then'`). O `adb` falso da calibração executava os argumentos direto, sem essa segunda leitura. Agora a conferência é um `ls` de um arquivo só, sem nada para o shell interpretar, e o `adb` falso imita a segunda leitura: com ele, o script anterior falha do mesmo jeito que no celular, e o corrigido passa. Casos errados: arquivo que não apagou, `run-as` que falha e resposta inesperada do `ls`. Nenhum outro `adb shell` do script tem caractere que o shell reinterprete.
 
 - **Sem tocar na tela (08/11/2026):** `-Conferir`, `-Autonomo` e `-Alcance` com `adb` falso e uma sonda falsa que responde como o `SondaBle.kt`, 22 casos. Certos: um celular, dois celulares, 1 m, alcance, os dois juntos, e o `exec-in` mudo ou quebrado caindo no `push`. Errados, cada um com o motivo certo na saída: nenhuma forma de levar o comando; `pm grant` que não pegou ou foi recusado; tela que não abre; sonda que não responde; L2CAP sem escuta; sonda que aceita comando fora da frente; procura sozinha que não dá `NAO_ACHOU_30S`; comando sem fim; calibração de um caminho que falhou; um celular só no `-Autonomo`; opções que não combinam. O `-SondaBle` à mão de antes continua igual. Tela: o PRÓXIMO PONTO só aparece quando a sonda espera a pessoa; sem essa condição, o teste falha.
+- **Desempate e coleta (09/11/2026):**
+  - `decidirOla`: 100.000 pares de nonces sorteados, sempre um cliente só. Duas sabotagens pegas: comparação com sinal, e "quem ainda não mandou OLA" sem desistir.
+  - Script, com `adb` falso que imita o logcat (endereços, um nome de fone, linhas de outro app, um trecho só no buffer): 31 casos.
+    - Certos: `-Ambos` dá 10 de 10 com 5 colisões resolvidas; o zip tem medidas, logcat, análise e transcrição, mesmo quando o roteiro falha.
+    - Errados: dois clientes depois da colisão saem como `DOIS CLIENTES`; sem calibração, a análise recusa (o `-Ambos` calibra antes por isso).
+    - Quatro sabotagens da coleta, cada uma pega: sem máscara, sem o filtro por processo, transcrição com cabeçalho, sem o buffer.
+    - Defeito achado nessa calibração e corrigido: com a máscara falhando, o arquivo sem máscara ficava em Downloads. Agora é apagado.
 - **A captura de tela** não é conferida fora do Windows (System.Drawing): o passo diz `SEM CONFERENCIA` em vez de quebrar.
 
 O que não dá para provar aqui: o Bluetooth de verdade, e se o `exec-in` ou o `run-as cp` passam no SELinux de cada aparelho. Isso é o `-Conferir` e o teste abaixo.
@@ -194,6 +222,7 @@ O que não dá para provar aqui: o Bluetooth de verdade, e se o `exec-in` ou o `
 Sem tocar na tela (recomendado):
 
 1. Com um celular só no cabo, primeiro: `powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -SondaBle -Conferir`.
+   - Desempate da colisão (decisão 12), os dois no cabo: `... -Todos -SondaBle -Ambos`.
 2. Com os dois no cabo, a 1 m um do outro: `... -Todos -SondaBle -Autonomo`.
 3. Alcance, com a trena: `... -Todos -SondaBle -Alcance` (ou `-Autonomo -Alcance` junto). O primeiro celular da lista do adb anuncia e o segundo procura: o script mostra qual é qual.
 
@@ -340,6 +369,8 @@ Arquivos `kryptos-sonda-*-20261109-003458.txt`, sem tocar na tela, os dois no Wi
 - **Presença:** quem procura BLE por perto vê que há um Kryptos ali (o identificador de serviço é fixo). Não vê quem é.
 - **Alcance:** ainda não medido (os celulares estavam juntos). Velocidade só a 1 m.
 - **Caminhos de volta:** medidos a 1 m em 09/11/2026 (seção acima); em distância, não. O Android aceitou o segundo cliente GATT no mesmo enlace, mas a escrita não escapou do sentido lento, e o L2CAP só melhorou 29%. O sentido lento é do enlace aberto pelo g15: nenhum dos três resolve. Com dois celulares, continua sem dar para separar aparelho de papel.
+- **Desempate pelo OLA:** cobre dois celulares. Com três ou mais (malha), cada par se resolve assim, mas a escolha de com quem conectar fica para o Cubo (decisão 10). O nonce não autentica nada: um aparelho mal-intencionado pode sempre mandar o maior e ficar de cliente. Na sonda isso não importa; no Kryptos, o passo 3 decide.
+- **Logcat mascarado:** endereço Bluetooth sempre; nome de aparelho só quando vem como `name=`, `nome=` ou `alias=`. Nome em outro formato, no log do serviço de Bluetooth (fones, carro), passaria. As linhas são só do app e do serviço de Bluetooth.
 - **L2CAP sem pareamento:** o enlace não é cifrado (como o GATT da sonda). No Kryptos isso não expõe conteúdo, que vai cifrado pelo Olm, mas quem escuta o rádio vê o tamanho e a hora de cada carta.
 - **Distância declarada:** a sonda não mede distância. A trena é a referência, e o RSSI é só a leitura do sinal naquele lugar, não posição.
 - **Dois modelos só:** outro chip pode se comportar diferente, principalmente com os dois papéis ao mesmo tempo e com o Coded.

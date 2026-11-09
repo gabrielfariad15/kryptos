@@ -24,6 +24,8 @@ import java.security.MessageDigest
  *   PEDIR_VOLTA = 4 | n (1) | sabotagem (1) | caminho (1)
  *   PREPARAR    = 5 | caminho (1)
  *   PRONTO      = 6 | caminho (1) | código (1) | PSM (2)
+ *   OLA         = 7 | modo (1) | nonce (8)
+ *   OLA_RESPOSTA= 8 | código (1)
  *
  * Inteiros em big-endian.
  *
@@ -36,6 +38,13 @@ import java.security.MessageDigest
  * sempre pelo GATT de sempre; só o INICIO e os pedaços da volta mudam de caminho.
  *
  * No L2CAP o canal é um fluxo de bytes: cada quadro vai numa moldura = tamanho (2) | quadro.
+ *
+ * OLA: o primeiro quadro do cliente, depois de ligar a notificação. Leva um número
+ * aleatório novo a cada conexão (nonce), que não identifica ninguém. Serve para o desempate
+ * quando os dois celulares conectam um no outro ao mesmo tempo (AMBOS): cada servidor
+ * compara o nonce do outro com o do próprio cliente, pela mesma regra (decidirOla), e só um
+ * cliente segue. Os celulares trocam o endereço Bluetooth por privacidade, então o endereço
+ * não serve para saber que a conexão que chegou é do mesmo aparelho (teste de 09/11/2026).
  */
 object QuadroSonda {
     const val MAX_VALOR_ATRIBUTO = 512
@@ -45,6 +54,8 @@ object QuadroSonda {
     const val TAMANHO_PEDIR_VOLTA = 4
     const val TAMANHO_PREPARAR = 2
     const val TAMANHO_PRONTO = 5
+    const val TAMANHO_OLA = 10
+    const val TAMANHO_OLA_RESPOSTA = 2
 
     const val TIPO_INICIO: Byte = 1
     const val TIPO_PEDACO: Byte = 2
@@ -52,6 +63,30 @@ object QuadroSonda {
     const val TIPO_PEDIR_VOLTA: Byte = 4
     const val TIPO_PREPARAR: Byte = 5
     const val TIPO_PRONTO: Byte = 6
+    const val TIPO_OLA: Byte = 7
+    const val TIPO_OLA_RESPOSTA: Byte = 8
+
+    // Resposta ao OLA.
+    const val OLA_ACEITO = 0
+    const val OLA_RECUSADO_COLISAO = 1   // os dois conectaram; o outro cliente venceu
+    const val OLA_RECUSADO_OCUPADO = 2   // este servidor já tem cliente
+
+    // Decisão do servidor ao receber um OLA.
+    const val DECISAO_ACEITAR = 0                // sem cliente meu ativo: aceita
+    const val DECISAO_ACEITAR_E_PARAR_O_MEU = 1  // aceita o outro e o meu cliente desiste
+    const val DECISAO_RECUSAR = 2                // o meu cliente vence; recusa o outro
+
+    /**
+     * Desempate. [meuNonce] é o nonce que o MEU cliente já mandou no OLA dele (null se ainda
+     * não mandou). Com os dois OLA no ar, A decide com (outro = nB, meu = nA) e B com
+     * (outro = nA, meu = nB): um aceita e para o próprio cliente, o outro recusa. Empate
+     * (chance de 1 em 2^64): os dois recusam e a rodada recomeça.
+     */
+    fun decidirOla(nonceDoOutro: Long, meuNonce: Long?, meuClienteAtivo: Boolean): Int {
+        if (!meuClienteAtivo) return DECISAO_ACEITAR
+        if (meuNonce == null) return DECISAO_ACEITAR_E_PARAR_O_MEU
+        return if (java.lang.Long.compareUnsigned(nonceDoOutro, meuNonce) > 0) DECISAO_ACEITAR_E_PARAR_O_MEU else DECISAO_RECUSAR
+    }
 
     // Caminho de volta.
     const val CAMINHO_NOTIFICACAO = 0
@@ -119,6 +154,8 @@ object QuadroSonda {
 
     class Pronto(val caminho: Int, val codigo: Int, val psm: Int)
 
+    class Ola(val ambos: Boolean, val nonce: Long)
+
     // ---------- montar ----------
 
     fun inicio(n: Int, dados: ByteArray, tamanhoPedaco: Int): ByteArray {
@@ -174,6 +211,16 @@ object QuadroSonda {
 
     fun preparar(caminho: Int): ByteArray = byteArrayOf(TIPO_PREPARAR, caminho.toByte())
 
+    fun ola(nonce: Long, ambos: Boolean): ByteArray {
+        val b = ByteArray(TAMANHO_OLA)
+        b[0] = TIPO_OLA
+        b[1] = if (ambos) 1 else 0
+        for (k in 0 until 8) b[2 + k] = (nonce ushr (56 - 8 * k)).toByte()
+        return b
+    }
+
+    fun olaResposta(codigo: Int): ByteArray = byteArrayOf(TIPO_OLA_RESPOSTA, codigo.toByte())
+
     fun pronto(caminho: Int, codigo: Int, psm: Int = 0): ByteArray {
         require(psm in 0..0xFFFF)
         val b = ByteArray(TAMANHO_PRONTO)
@@ -226,6 +273,22 @@ object QuadroSonda {
         val codigo = b[2].toInt() and 0xFF
         if (c !in CAMINHO_ESCRITA..CAMINHO_L2CAP || codigo > PRONTO_FALHOU) return null
         return Pronto(c, codigo, le16(b, 3))
+    }
+
+    fun lerOla(b: ByteArray): Ola? {
+        if (b.size != TAMANHO_OLA || b[0] != TIPO_OLA) return null
+        val modo = b[1].toInt() and 0xFF
+        if (modo > 1) return null
+        var n = 0L
+        for (k in 0 until 8) n = (n shl 8) or (b[2 + k].toLong() and 0xFF)
+        return Ola(modo == 1, n)
+    }
+
+    /** O código da resposta, ou null. */
+    fun lerOlaResposta(b: ByteArray): Int? {
+        if (b.size != TAMANHO_OLA_RESPOSTA || b[0] != TIPO_OLA_RESPOSTA) return null
+        val c = b[1].toInt() and 0xFF
+        return if (c <= OLA_RECUSADO_OCUPADO) c else null
     }
 
     // ---------- moldura do L2CAP ----------

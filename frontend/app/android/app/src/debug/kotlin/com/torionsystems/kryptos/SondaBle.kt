@@ -65,8 +65,13 @@ import java.util.concurrent.Executors
  *    caminho escolhido na tela (QuadroSonda): NOTIFICACAO (servidor notifica), ESCRITA
  *    (servidor vira cliente GATT do cliente no mesmo enlace e escreve sem resposta) ou
  *    L2CAP (canal L2CAP orientado a conexão, sem pareamento).
- *  - AMBOS: os dois papéis ao mesmo tempo; o desempate é uma espera aleatória antes de
- *    conectar, sem nenhum dado a mais no anúncio.
+ *  - AMBOS: os dois papéis ao mesmo tempo. Uma espera aleatória antes de conectar evita a
+ *    maioria das colisões; quando os dois conectam mesmo assim, o desempate é no OLA (o
+ *    primeiro quadro do cliente, com um nonce novo por conexão): cada servidor compara o
+ *    nonce do outro com o do próprio cliente (QuadroSonda.decidirOla) e só um cliente segue.
+ *    Nada a mais no anúncio. O servidor não decide pelo endereço: os celulares trocam o
+ *    endereço Bluetooth por privacidade, e a conexão que chega do outro vem com um endereço
+ *    diferente do da conexão que este abriu (teste de 09/11/2026).
  *
  * Comandos do script (ferramentas/sonda-roteiro.ps1): o script grava uma linha em
  * files/sonda-comando.txt pelo run-as (só app de debug, só pelo cabo; nenhum outro app
@@ -320,7 +325,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             repeticoes = c["repeticoes"]?.toIntOrNull() ?: if (calibrar) 3 else 5,
             calibrar = calibrar,
             volta = c["volta"] ?: "NOTIFICACAO",
+            esperaAmbosMs = c["espera_ms"]?.toIntOrNull() ?: ESPERA_AMBOS_MAX_MS,
         )
+        if (cfg.esperaAmbosMs !in 0..5_000) return null
         // A calibração depende de 3 rodadas: sabotagem na 1ª e na 2ª, nada na 3ª.
         if (calibrar && cfg.repeticoes < 3) return null
         return if (configValida(cfg)) cfg else null
@@ -592,8 +599,12 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private var servidorModo = ""
     private var servidorPronto = false
     private var saidaServidor: BluetoothGattCharacteristic? = null
+    // O cliente aceito no OLA. Antes do OLA, uma conexão é só uma conexão: pode ser a que
+    // este aparelho abriu como cliente (o Android avisa o servidor dela também).
     private var clienteDoServidor: BluetoothDevice? = null
-    private var notificacaoLigada = false
+    private val notificacaoLigadaPara = mutableSetOf<BluetoothDevice>()
+    private val mtuPorAparelho = mutableMapOf<BluetoothDevice, Int>()
+    private val semOlaAvisado = mutableSetOf<BluetoothDevice>()
     private var mtuServidor = 23
     private var remontagemServidor: QuadroSonda.Remontagem? = null
     private val conjuntos = mutableListOf<AdvertisingSetCallback>()
@@ -603,7 +614,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     // notificandoAgora; sai da fila no onNotificationSent. Quadro novo entra no fim: no
     // teste de 08/11/2026 o PEDIR_VOLTA chegou antes do aviso de envio do RESULTADO, e a
     // versão que recusava ("NOTIFICACAO_EM_ANDAMENTO") deixou a volta sem resposta.
-    private val filaNotificacao = ArrayDeque<ByteArray>()
+    private val filaNotificacao = ArrayDeque<Pair<BluetoothDevice, ByteArray>>()
     private var notificandoAgora = false
     private var ocupadoNotificacao = 0
     private var voltaServidorN = 0
@@ -735,31 +746,34 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
             h.post {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    if (clienteDoServidor != null && clienteDoServidor != device) {
-                        // Um cliente por vez. Não grava quem era.
-                        servidor?.cancelConnection(device)
-                        medida("servidor", "evento=outro_cliente_recusado")
-                        return@post
-                    }
-                    clienteDoServidor = device
-                    notificacaoLigada = false
-                    mtuServidor = 23
+                    // Aceita a conexão; quem é o cliente se decide no OLA.
+                    mtuPorAparelho[device] = 23
+                    notificacaoLigadaPara -= device
                     medida("servidor", "evento=conectou status=$status")
-                    aoServidorConectado(device)
-                } else if (newState == BluetoothProfile.STATE_DISCONNECTED && device == clienteDoServidor) {
-                    clienteDoServidor = null
-                    remontagemServidor = null
-                    esvaziarNotificacoes()
-                    fecharReversa()
-                    fecharL2capServidor()
-                    h.removeCallbacks(tempoVoltaServidor)
-                    medida("servidor", "evento=desconectou status=$status")
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    mtuPorAparelho -= device
+                    notificacaoLigadaPara -= device
+                    semOlaAvisado -= device
+                    descartarNotificacoes(device)
+                    if (device == clienteDoServidor) {
+                        clienteDoServidor = null
+                        remontagemServidor = null
+                        esvaziarNotificacoes()
+                        fecharReversa()
+                        fecharL2capServidor()
+                        h.removeCallbacks(tempoVoltaServidor)
+                        medida("servidor", "evento=desconectou status=$status")
+                    }
+                    notificarProximo() // o que era para outro aparelho continua
                 }
             }
         }
 
         override fun onMtuChanged(device: BluetoothDevice, mtu: Int) {
-            h.post { if (device == clienteDoServidor) mtuServidor = mtu }
+            h.post {
+                mtuPorAparelho[device] = mtu
+                if (device == clienteDoServidor) mtuServidor = mtu
+            }
         }
 
         override fun onDescriptorWriteRequest(
@@ -771,7 +785,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 servidor?.sendResponse(device, requestId, if (ok) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE, offset, null)
             }
             val ligar = ok && value.contentEquals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-            h.post { if (device == clienteDoServidor) notificacaoLigada = ligar }
+            h.post { if (ligar) notificacaoLigadaPara += device else notificacaoLigadaPara -= device }
         }
 
         override fun onCharacteristicWriteRequest(
@@ -780,31 +794,73 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         ) {
             if (responseNeeded) servidor?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
             val copia = value?.copyOf() ?: ByteArray(0)
-            h.post { if (device == clienteDoServidor && characteristic.uuid == UUID_ENTRADA) entradaDoServidor(copia) }
+            h.post { if (characteristic.uuid == UUID_ENTRADA) entradaDoServidor(device, copia) }
         }
 
         override fun onNotificationSent(device: BluetoothDevice, status: Int) {
             h.post {
-                if (device != clienteDoServidor) return@post
+                // Só conta o aviso do aparelho que está na frente da fila.
+                if (!notificandoAgora || filaNotificacao.firstOrNull()?.first != device) return@post
                 if (status != BluetoothGatt.GATT_SUCCESS) {
                     falha("NOTIFICACAO", "papel=servidor status=$status n=$voltaServidorN")
-                    esvaziarNotificacoes()
+                    if (device == clienteDoServidor) esvaziarNotificacoes() else descartarNotificacoes(device)
+                    notificarProximo()
                     return@post
                 }
-                if (notificandoAgora && filaNotificacao.isNotEmpty()) filaNotificacao.removeFirst()
+                filaNotificacao.removeFirst()
                 notificandoAgora = false
                 notificarProximo()
             }
         }
     }
 
-    private fun entradaDoServidor(q: ByteArray) {
+    /** O OLA decide quem é o cliente deste servidor (ver decidirOla). */
+    private fun tratarOla(device: BluetoothDevice, q: ByteArray) {
+        val ola = QuadroSonda.lerOla(q)
+        if (ola == null) { falha("QUADRO_INVALIDO", "papel=servidor tipo=ola"); return }
+        if (device == clienteDoServidor) { responderOla(device, QuadroSonda.OLA_ACEITO); return } // repetido
+        if (clienteDoServidor != null) {
+            medida("servidor", "evento=ola_recusado motivo=ocupado")
+            responderOla(device, QuadroSonda.OLA_RECUSADO_OCUPADO)
+            return
+        }
+        val meuAtivo = cliente != null
+        when (QuadroSonda.decidirOla(ola.nonce, meuNonce, meuAtivo)) {
+            QuadroSonda.DECISAO_RECUSAR -> {
+                // Os dois conectaram e o meu cliente vence: o outro vira só servidor.
+                medida("ambos", "desfecho=colisao este=cliente")
+                responderOla(device, QuadroSonda.OLA_RECUSADO_COLISAO)
+                return
+            }
+            QuadroSonda.DECISAO_ACEITAR_E_PARAR_O_MEU -> {
+                medida("ambos", if (meuNonce != null) "desfecho=colisao este=servidor" else "desfecho=servidor")
+                desfechoCliente = "servidor"
+                codigoDesfecho = ""
+                pararCliente()
+            }
+        }
+        clienteDoServidor = device
+        mtuServidor = mtuPorAparelho[device] ?: 23
+        remontagemServidor = null
+        semOlaAvisado -= device
+        medida("servidor", "evento=cliente_aceito modo=${if (ola.ambos) "AMBOS" else "PAPEIS"}")
+        responderOla(device, QuadroSonda.OLA_ACEITO)
+    }
+
+    private fun responderOla(device: BluetoothDevice, codigo: Int) =
+        notificar(listOf(QuadroSonda.olaResposta(codigo)), envioDeVolta = false, para = device)
+
+    private fun entradaDoServidor(device: BluetoothDevice, q: ByteArray) {
+        if (QuadroSonda.tipo(q) == QuadroSonda.TIPO_OLA) { tratarOla(device, q); return }
+        if (device != clienteDoServidor) {
+            // Quadro de quem não se apresentou (ou foi recusado): fora. Avisa uma vez.
+            if (semOlaAvisado.add(device)) falha("QUADRO_SEM_OLA", "papel=servidor")
+            return
+        }
         when (QuadroSonda.tipo(q)) {
             QuadroSonda.TIPO_INICIO -> {
                 val ini = QuadroSonda.lerInicio(q)
                 if (ini == null) { falha("QUADRO_INVALIDO", "papel=servidor tipo=inicio"); return }
-                // AMBOS: o outro escrevendo aqui enquanto este também é cliente = os dois conectaram.
-                if (servidorModo == "AMBOS" && gatt != null && ini.n == 1) medida("ambos", "desfecho=duas_conexoes")
                 remontagemServidor = QuadroSonda.Remontagem(ini) { SystemClock.elapsedRealtime() }
             }
             QuadroSonda.TIPO_PEDACO -> {
@@ -880,11 +936,19 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         }
     }
 
-    private fun notificar(quadros: List<ByteArray>, envioDeVolta: Boolean) {
-        if (!notificacaoLigada) { falha("SEM_NOTIFICACAO", "papel=servidor"); return }
+    private fun notificar(quadros: List<ByteArray>, envioDeVolta: Boolean, para: BluetoothDevice? = clienteDoServidor) {
+        val d = para ?: run { falha("SEM_CLIENTE", "papel=servidor"); return }
+        if (d !in notificacaoLigadaPara) { falha("SEM_NOTIFICACAO", "papel=servidor"); return }
         if (envioDeVolta) ocupadoNotificacao = 0
-        filaNotificacao.addAll(quadros)
+        for (q in quadros) filaNotificacao.addLast(d to q)
         if (!notificandoAgora) notificarProximo()
+    }
+
+    /** Tira da fila o que era para um aparelho que saiu (ou foi recusado). */
+    private fun descartarNotificacoes(device: BluetoothDevice) {
+        val naFrente = filaNotificacao.firstOrNull()?.first == device
+        filaNotificacao.removeAll { it.first == device }
+        if (naFrente) notificandoAgora = false
     }
 
     private fun esvaziarNotificacoes() {
@@ -894,10 +958,10 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
 
     private fun notificarProximo() {
         val g = servidor ?: return
-        val d = clienteDoServidor ?: return
         val c = saidaServidor ?: return
         if (notificandoAgora || filaNotificacao.isEmpty()) return
-        val r = g.notifyCharacteristicChanged(d, c, false, filaNotificacao.first())
+        val (d, q) = filaNotificacao.first()
+        val r = g.notifyCharacteristicChanged(d, c, false, q)
         if (r == BluetoothStatusCodes.SUCCESS) { notificandoAgora = true; return } // espera o onNotificationSent
         ocupadoNotificacao++
         if (ocupadoNotificacao > TENTATIVAS_OCUPADO_MAX) {
@@ -1094,19 +1158,6 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         try { c?.close() } catch (e: IOException) { Log.e(TAG, "fechar canal: ${e.javaClass.simpleName}") }
     }
 
-    private fun aoServidorConectado(device: BluetoothDevice) {
-        if (servidorModo != "AMBOS") return
-        // O Android avisa o servidor também da conexão que este aparelho abriu como
-        // cliente. Essa não conta como "o outro conectou primeiro".
-        if (device == dispositivoAlvo && gatt != null) return
-        // Quem recebeu a conexão antes de conectar fica de servidor.
-        if (cliente != null && gatt == null) {
-            medida("ambos", "desfecho=servidor")
-            desfechoCliente = "servidor"
-            pararCliente()
-        }
-    }
-
     private fun fecharServidor() {
         h.removeCallbacks(tempoServico)
         h.removeCallbacks(tempoVoltaServidor)
@@ -1125,6 +1176,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             Log.e(TAG, "fechar servidor: ${e.javaClass.simpleName}")
         }
         clienteDoServidor = null
+        notificacaoLigadaPara.clear()
+        mtuPorAparelho.clear()
+        semOlaAvisado.clear()
         remontagemServidor = null
         esvaziarNotificacoes()
         fecharReversa()
@@ -1140,6 +1194,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         val modo: String, val phy: String, val prioridade: String,
         val distancia: Int, val repeticoes: Int, val calibrar: Boolean,
         val volta: String,
+        // Espera aleatória máxima antes de conectar no AMBOS; 0 provoca a colisão (teste do desempate).
+        val esperaAmbosMs: Int = ESPERA_AMBOS_MAX_MS,
     ) {
         val caminho: Int get() = QuadroSonda.caminhoDoNome(volta) ?: QuadroSonda.CAMINHO_NOTIFICACAO
     }
@@ -1186,7 +1242,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
 
     private fun campos(c: Config) =
         "rodada=$rodada modo=${c.modo} distancia=${c.distancia} phy=${c.phy} prioridade=${c.prioridade} " +
-            "volta=${c.volta} calibrar=${sn(c.calibrar)}"
+            "volta=${c.volta} calibrar=${sn(c.calibrar)}${if (c.modo == "AMBOS") " espera_ms=${c.esperaAmbosMs}" else ""}"
 
     /** Espera um evento. O tratador devolve true quando consumiu; false, continua esperando. */
     private fun esperar(nome: String, ms: Long, tratar: (Ev) -> Boolean) {
@@ -1283,7 +1339,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         medida("achou", "${campos(cfg)} phy_anuncio=${nomePhy(r.primaryPhy)} rssi=${r.rssi} tx_anuncio=$tx ms=$ms procuras_30s=${procuras.size}")
         val dispositivo = r.device
         if (cfg.modo == "AMBOS") {
-            val espera = sorteio.nextInt(ESPERA_AMBOS_MAX_MS + 1).toLong()
+            val espera = sorteio.nextInt(cfg.esperaAmbosMs + 1).toLong()
             etapa = "espera_ambos"
             h.postDelayed({ if (cliente === cfg && gatt == null) conectar(cfg, dispositivo) }, espera)
         } else {
@@ -1409,13 +1465,49 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             if (ev !is Ev.Descritor) return@esperar false
             seguir {
                 if (ev.status != BluetoothGatt.GATT_SUCCESS) { falharCliente("NOTIFICACAO", "status=${ev.status}"); return@seguir }
-                when (cfg.caminho) {
-                    QuadroSonda.CAMINHO_ESCRITA -> abrirServidorVolta(g, cfg)
-                    QuadroSonda.CAMINHO_L2CAP -> prepararVolta(g, cfg, SystemClock.elapsedRealtime())
-                    else -> ida(g, cfg, 1)
-                }
+                apresentar(g, cfg)
             }
         }
+    }
+
+    // O nonce do OLA deste cliente; null enquanto não mandou (ver decidirOla).
+    private var meuNonce: Long? = null
+
+    /** OLA: o primeiro quadro, com um nonce novo. Só segue com a resposta ACEITO. */
+    private fun apresentar(g: BluetoothGatt, cfg: Config) {
+        val nonce = sorteio.nextLong()
+        meuNonce = nonce
+        val comeco = SystemClock.elapsedRealtime()
+        var resposta: Int? = null
+        var escritaFim = false
+        fun talvezSeguir() {
+            val r = resposta ?: return
+            if (!escritaFim) return
+            pararTransferencia()
+            when (r) {
+                QuadroSonda.OLA_ACEITO -> {
+                    medida("ola", "${campos(cfg)} resultado=aceito ms=${SystemClock.elapsedRealtime() - comeco}")
+                    when (cfg.caminho) {
+                        QuadroSonda.CAMINHO_ESCRITA -> abrirServidorVolta(g, cfg)
+                        QuadroSonda.CAMINHO_L2CAP -> prepararVolta(g, cfg, SystemClock.elapsedRealtime())
+                        else -> ida(g, cfg, 1)
+                    }
+                }
+                QuadroSonda.OLA_RECUSADO_COLISAO -> {
+                    // O outro venceu o desempate: este fica só de servidor para ele.
+                    medida("ambos", "desfecho=colisao este=servidor lado=cliente")
+                    desfechoCliente = "servidor"
+                    codigoDesfecho = ""
+                    pararCliente()
+                }
+                else -> falharCliente("OLA_RECUSADO", "codigo=$r")
+            }
+        }
+        iniciarTransferencia("ola") { v ->
+            val r = QuadroSonda.lerOlaResposta(v)
+            if (r != null && resposta == null) { resposta = r; talvezSeguir() }
+        }
+        escrever(g, listOf(QuadroSonda.ola(nonce, cfg.modo == "AMBOS")), 0, IntArray(1)) { escritaFim = true; talvezSeguir() }
     }
 
     private fun sabotagem(cfg: Config, n: Int): Int = when {
@@ -1723,6 +1815,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         cliente = null
         dispositivoAlvo = null
         entradaCliente = null
+        meuNonce = null
         fecharVoltaCliente()
         try {
             g?.disconnect()

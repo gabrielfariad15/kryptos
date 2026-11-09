@@ -15,6 +15,7 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -SondaBle -Conferir
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo -Alcance
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Ambos
 #
 # Sem parametro: exige um unico celular no cabo. Com mais de um, use -Todos ou -Serial.
 #
@@ -55,9 +56,21 @@
 #     medidas sem a analise (sem o outro celular nao ha calibracao).
 #   -Autonomo: os dois no cabo, a 1 m: calibra e mede os tres caminhos de volta nos dois
 #     sentidos, AMBOS 3 vezes e o ciclo de vida. Depois traz as medidas e analisa.
+#   -Ambos: os dois no cabo, a 1 m: so o AMBOS, 5 vezes com a espera aleatoria e 5 com
+#     espera 0 (colisao provocada), para conferir o desempate pelo OLA.
 #   -Alcance: carrega o roteiro de distancias (o segundo celular procura, o primeiro
 #     anuncia); voce tira os cabos, leva os celulares a cada distancia e toca PROXIMO
 #     PONTO; no fim, cabos de volta e FIM. Sem -Autonomo, calibra a 1 m antes.
+#
+# Coleta (-SondaBle e -LerSonda): tudo vai para um zip em Downloads, kryptos-sonda-<carimbo>.zip:
+#   - as medidas de cada celular (files/sonda-ble.txt, pelo run-as);
+#   - o logcat de cada celular: em fluxo do abrir do app ate o fim, mais o que estiver no
+#     buffer do celular no fim (pega o trecho sem cabo do -Alcance); so as linhas do
+#     processo do app e do Bluetooth; enderecos Bluetooth trocados por apelidos (bt-1,
+#     bt-2...) e nomes de aparelho trocados por <oculto> (regra 8.2 e modo-direto.md);
+#   - a analise (analisar-sonda-ble.ps1) num arquivo;
+#   - a transcricao desta janela, sem o cabecalho do PowerShell (usuario e maquina);
+#   - bateria e temperatura de cada celular no comeco e no fim, nas linhas de resultado.
 #
 # -LerSonda: so a leitura do -SondaBle, sem compilar, instalar nem zerar nada. Para quando
 # o -SondaBle parou depois do teste (celular que nao voltou ao cabo, janela fechada): as
@@ -88,6 +101,7 @@ param(
     [switch]$LerSonda,
     [switch]$Conferir,
     [switch]$Autonomo,
+    [switch]$Ambos,
     [switch]$Alcance
 )
 
@@ -116,7 +130,12 @@ $pararCapturas = $null
 $medidasSonda = 'files/sonda-ble.txt'
 $arquivosSonda = New-Object System.Collections.Generic.List[string]
 $carimbo = Get-Date -Format 'yyyyMMdd-HHmmss'
-$automatico = $Conferir -or $Autonomo -or $Alcance
+$automatico = $Conferir -or $Autonomo -or $Ambos -or $Alcance
+# Coleta: arquivos que vao para o zip no fim; logcat em fluxo por celular; transcricao.
+$coleta = New-Object System.Collections.Generic.List[string]
+$capturasLogcat = @{}
+$apelidosBt = @{}
+$transcricao = $null
 $arqEnderecoPublico = Join-Path (Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Kryptos') 'relay-publico') 'endereco.txt'
 $enderecoPublico = $null
 
@@ -149,6 +168,102 @@ function Achar([string]$Pasta, [string[]]$Nomes) {
     throw "nao achei $($Nomes -join ' / ') em $Pasta"
 }
 
+function Bateria([string]$s) {
+    try {
+        $t = Rodar $adb @('-s', $s, 'shell', 'dumpsys', 'battery')
+        $nivel = if ($t -match 'level:\s*(\d+)') { "$($Matches[1])%" } else { '?' }
+        $temp = if ($t -match 'temperature:\s*(\d+)') { [string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0:0.0} C', [int]$Matches[1] / 10) } else { '?' }
+        return "bateria $nivel, $temp"
+    } catch { return "bateria nao lida ($(($_.Exception.Message -split "`n")[0]))" }
+}
+
+# Endereco Bluetooth vira apelido (o mesmo endereco, o mesmo apelido em todos os arquivos
+# desta execucao); nome de aparelho vira <oculto>. O apelido nao sai desta execucao.
+function Mascarar([string]$l) {
+    $l = [regex]::Replace($l, '(?i)\b(?:[0-9a-fx]{2}[:-]){5}[0-9a-f]{2}\b', [System.Text.RegularExpressions.MatchEvaluator]{
+        param($m)
+        $k = $m.Value.ToUpperInvariant()
+        if (-not $script:apelidosBt.ContainsKey($k)) { $script:apelidosBt[$k] = "bt-$($script:apelidosBt.Count + 1)" }
+        $script:apelidosBt[$k]
+    })
+    return [regex]::Replace($l, '(?i)\b(name|nome|alias)\s*([=:])\s*("[^"]*"|''[^'']*''|[^,\s\]\}\)]+)', '$1$2<oculto>')
+}
+
+function IniciarLogcat([string]$s) {
+    $base = Join-Path ([System.IO.Path]::GetTempPath()) ('kryptos-logcat-' + [guid]::NewGuid().ToString('N'))
+    $p = Start-Process -FilePath $adb -ArgumentList @('-s', $s, 'logcat', '-v', 'threadtime', '-b', 'main,system,crash') `
+        -RedirectStandardOutput "$base.txt" -RedirectStandardError "$base.err" -PassThru -NoNewWindow
+    $script:capturasLogcat[$s] = [pscustomobject]@{ Proc = $p; Bruto = "$base.txt"; Erro = "$base.err"; Pids = (New-Object System.Collections.Generic.List[string]) }
+}
+
+function PararCapturasLogcat {
+    foreach ($c in @($script:capturasLogcat.Values)) {
+        try { if (-not $c.Proc.HasExited) { Stop-Process -Id $c.Proc.Id -Force } } catch { Write-Host "   aviso: nao parei o logcat ($($_.Exception.Message))" }
+    }
+}
+
+function ApagarBrutosLogcat {
+    foreach ($c in @($script:capturasLogcat.Values)) {
+        foreach ($f in @($c.Bruto, $c.Erro)) { if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
+    }
+}
+
+# Fluxo + buffer do celular, so app e Bluetooth, mascarado, gravado e lido de volta.
+function ColherLogcat($a, [string]$modeloArq) {
+    $s = $a.Serial
+    $c = $script:capturasLogcat[$s]
+    if ($c) { try { if (-not $c.Proc.HasExited) { Stop-Process -Id $c.Proc.Id -Force; $c.Proc.WaitForExit(5000) | Out-Null } } catch { Write-Host "   aviso: logcat do $($a.Modelo): $($_.Exception.Message)" } }
+    $linhas = New-Object System.Collections.Generic.List[string]
+    $vistas = New-Object 'System.Collections.Generic.HashSet[string]'
+    $doFluxo = 0
+    if ($c -and (Test-Path -LiteralPath $c.Bruto)) {
+        foreach ($l in [System.IO.File]::ReadLines($c.Bruto)) { if ($vistas.Add($l)) { $linhas.Add($l); $doFluxo++ } }
+    }
+    $doBuffer = 0
+    foreach ($l in @((Rodar $adb @('-s', $s, 'logcat', '-d', '-v', 'threadtime', '-b', 'main,system,crash')) -split "`n")) {
+        $l = $l.TrimEnd("`r")
+        if ($vistas.Add($l)) { $linhas.Add($l); $doBuffer++ }
+    }
+    # Processos que interessam: o app (pid ao abrir e agora) e o servico de Bluetooth.
+    $pids = New-Object 'System.Collections.Generic.HashSet[string]'
+    if ($c) { foreach ($p in $c.Pids) { [void]$pids.Add($p) } }
+    foreach ($proc in @($Pacote, 'com.android.bluetooth', 'com.google.android.bluetooth')) {
+        try { foreach ($p in @((Rodar $adb @('-s', $s, 'shell', 'pidof', $proc)) -split '\s+')) { if ($p -match '^\d+$') { [void]$pids.Add($p) } } } catch { $null = $_ }
+    }
+    $saida = New-Object System.Collections.Generic.List[string]
+    foreach ($l in $linhas) {
+        if ($l -match '^\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}\s+(\d+)\s+\d+\s+[VDIWEFA]\s' -and ($pids.Contains($Matches[1]) -or $l -match 'KryptosSonda')) {
+            $saida.Add((Mascarar $l))
+        }
+    }
+    $destino = Join-Path $Amb.downloads "kryptos-logcat-$modeloArq-$carimbo.txt"
+    [System.IO.File]::WriteAllLines($destino, $saida.ToArray(), (New-Object System.Text.UTF8Encoding($false)))
+    $lido = @([System.IO.File]::ReadAllLines($destino))
+    if ($lido.Count -ne $saida.Count) { throw "o logcat gravado em $destino nao bate com o colhido ($($lido.Count) de $($saida.Count) linhas)" }
+    $vaza = @($lido | Where-Object { $_ -match '(?i)\b(?:[0-9a-f]{2}:){5}[0-9a-f]{2}\b' })
+    if ($vaza.Count -gt 0) {
+        Remove-Item -LiteralPath $destino -Force
+        if (Test-Path -LiteralPath $destino) { throw "o logcat de $destino ficou com endereco Bluetooth e nao consegui apagar: apague a mao" }
+        throw "o logcat mascarado ainda tinha $($vaza.Count) linhas com endereco Bluetooth: apagado, nao vai para o zip"
+    }
+    $script:coleta.Add($destino)
+    return "$destino, $($saida.Count) linhas do app e do Bluetooth (fluxo $doFluxo, so no buffer $doBuffer; processos $(@($pids).Count)); $($script:apelidosBt.Count) enderecos mascarados"
+}
+
+# Tira o cabecalho e o rodape que o PowerShell poe na transcricao (usuario, maquina,
+# caminho do executavel), grava e le de volta.
+function LimparTranscricao([string]$arq) {
+    $l = @([System.IO.File]::ReadAllLines($arq))
+    $estrelas = @(for ($i = 0; $i -lt $l.Count; $i++) { if ($l[$i] -match '^\*{10,}$') { $i } })
+    $fim = $l.Count
+    $ini = 0
+    if ($estrelas.Count -ge 2) { $ini = $estrelas[1] + 1 }
+    if ($estrelas.Count -ge 4) { $fim = $estrelas[$estrelas.Count - 2] }
+    if ($fim -le $ini) { $corpo = @() } else { $corpo = @($l[$ini..($fim - 1)] | Where-Object { $_ -notmatch '^(Transcript started|Transcricao iniciada|Transcri.+iniciada)' }) }
+    [System.IO.File]::WriteAllLines($arq, $corpo, (New-Object System.Text.UTF8Encoding($false)))
+    if (@([System.IO.File]::ReadAllLines($arq)) -match '^(Username|RunAs User|Machine|Host Application):') { throw 'a transcricao ainda tem o cabecalho' }
+}
+
 # Traz o arquivo de medidas da sonda de cada celular (run-as, so app de debug), grava em
 # Downloads, le de volta, zipa e roda o analisar-sonda-ble.ps1. Usada pelo -SondaBle depois
 # do FIM e pelo -LerSonda.
@@ -177,13 +292,11 @@ function LerEAnalisarSonda([switch]$SemAnalise) {
             $lido = [System.IO.File]::ReadAllText($destino)
             if ($lido.TrimEnd() -ne $t.TrimEnd()) { throw "o arquivo gravado em $destino nao bate com o lido do celular" }
             $arquivosSonda.Add($destino)
+            $coleta.Add($destino)
             "$destino, $(@($t -split "`n").Count) linhas"
         }
-    }
-    Passo 'zip das medidas' {
-        $zip = Join-Path $Amb.downloads "kryptos-sonda-$carimbo.zip"
-        Compress-Archive -Path $arquivosSonda.ToArray() -DestinationPath $zip
-        "$zip ($([math]::Round((Get-Item -LiteralPath $zip).Length / 1KB)) KB), pronto para anexar"
+        Passo "$($a.Modelo) : logcat (app e Bluetooth, enderecos mascarados)" { ColherLogcat $a $modeloArq }
+        Passo "$($a.Modelo) : estado no fim" { Bateria $a.Serial }
     }
     if ($SemAnalise) { return }
     $ps = (Get-Process -Id $PID).Path
@@ -195,17 +308,25 @@ function LerEAnalisarSonda([switch]$SemAnalise) {
     $codigoAnalise = $LASTEXITCODE
     $resultados.Add('..    analise da sonda (ferramentas\analisar-sonda-ble.ps1):')
     foreach ($l in $saidaAnalise) { $resultados.Add("      $l") }
+    $arqAnalise = Join-Path $Amb.downloads "kryptos-analise-$carimbo.txt"
+    [System.IO.File]::WriteAllLines($arqAnalise, [string[]]@($saidaAnalise | ForEach-Object { "$_" }), (New-Object System.Text.UTF8Encoding($false)))
+    $coleta.Add($arqAnalise)
     if ($codigoAnalise -ne 0) { throw 'a analise da sonda saiu com FALHA (ver acima)' }
 }
 
 $ok = $false
 try {
+    if ($SondaBle -or $LerSonda) {
+        $transcricao = Join-Path $Amb.downloads "kryptos-execucao-$carimbo.txt"
+        try { Start-Transcript -LiteralPath $transcricao -Force | Out-Null }
+        catch { Write-Host "   aviso: sem transcricao ($($_.Exception.Message))"; $transcricao = $null }
+    }
     if ($Todos -and $Serial) { throw 'use -Todos ou -Serial, nao os dois' }
     if ($Relay -and $RelayPublico) { throw 'use -Relay ou -RelayPublico, nao os dois' }
     if (($SondaBle -or $LerSonda) -and ($Relay -or $RelayPublico)) { throw 'a sonda BLE nao usa relay: -SondaBle e -LerSonda nao combinam com -Relay nem -RelayPublico' }
     if ($SondaBle -and $LerSonda) { throw 'use -SondaBle (teste inteiro) ou -LerSonda (so a leitura), nao os dois' }
-    if ($automatico -and -not $SondaBle) { throw '-Conferir, -Autonomo e -Alcance sao modos da sonda: use junto com -SondaBle' }
-    if ($Conferir -and ($Autonomo -or $Alcance)) { throw '-Conferir e a conferencia com um celular: nao combina com -Autonomo nem -Alcance' }
+    if ($automatico -and -not $SondaBle) { throw '-Conferir, -Autonomo, -Ambos e -Alcance sao modos da sonda: use junto com -SondaBle' }
+    if ($Conferir -and ($Autonomo -or $Ambos -or $Alcance)) { throw '-Conferir e a conferencia com um celular: nao combina com -Autonomo, -Ambos nem -Alcance' }
     $flutter = Achar (Join-Path $Amb.flutter 'bin') @('flutter.bat', 'flutter')
     $adb = Achar (Join-Path $Amb.android_sdk 'platform-tools') @('adb.exe', 'adb')
     $app = Join-Path (Join-Path $Repo 'frontend') 'app'
@@ -413,7 +534,7 @@ try {
                 catch { $w = "nao lido ($($_.Exception.Message -split "`n" | Select-Object -First 1))" }
                 # O Wi-Fi divide os 2,4 GHz com o Bluetooth: so registra, para comparar rodadas.
                 $estadoWifi = if ($w -match 'disabled') { 'desligado' } elseif ($w -match 'enabled') { 'ligado' } else { $w }
-                "ligado; Wi-Fi $estadoWifi (mantenha igual em todas as rodadas)"
+                "ligado; Wi-Fi $estadoWifi (mantenha igual em todas as rodadas); $(Bateria $s)"
             }
             if ($automatico) {
                 # Sem tocar na tela: a permissao "dispositivos por perto" pelo adb, e
@@ -445,6 +566,8 @@ try {
 
         Passo "$modeloAtual : abrir o app" {
             try { Rodar $adb @('-s', $s, 'logcat', '-c') | Out-Null } catch { Write-Host "   aviso: nao limpei o logcat; a conferencia pode pegar erro antigo" }
+            # Sonda: o logcat inteiro desta execucao, em fluxo, ate a leitura no fim.
+            if ($SondaBle) { IniciarLogcat $s }
             Rodar $adb @('-s', $s, 'shell', 'am', 'start', '-W', '-n', "$Pacote/.MainActivity") | Out-Null
             Start-Sleep -Seconds 5
             $processo = $null
@@ -453,6 +576,7 @@ try {
                 $log = Rodar $adb @('-s', $s, 'logcat', '-d', '-t', '200', '*:E')
                 throw "o app nao ficou aberto. Ultimos erros do logcat:`n$log"
             }
+            if ($capturasLogcat.ContainsKey($s)) { foreach ($p in @("$processo" -split '\s+')) { if ($p -match '^\d+$') { $capturasLogcat[$s].Pids.Add($p) } } }
             "processo $processo"
         }
 
@@ -520,6 +644,7 @@ try {
         $etapas = @()
         if ($Conferir) { $etapas += , @('Conferir') }
         if ($Autonomo) { $etapas += , @('UmMetro') }
+        if ($Ambos) { $etapas += , @('Ambos') }
         if ($Alcance) { $etapas += , @(@('Alcance') + $(if ($Autonomo) { @('-SemCalibrar') } else { @() })) }
         foreach ($etapa in $etapas) {
             $resultados.Add("..    sonda-roteiro.ps1 -Modo $($etapa[0]):")
@@ -695,11 +820,29 @@ try {
         Write-Host 'relay de teste desligado'
     }
     foreach ($l in $logsRelay) { if (Test-Path -LiteralPath $l) { Remove-Item -LiteralPath $l -Force } }
+    # O logcat em fluxo para aqui de qualquer jeito, e os brutos (com enderecos) saem.
+    PararCapturasLogcat
+    ApagarBrutosLogcat
     Set-Location -LiteralPath $Repo
     Write-Host ''
     foreach ($linha in $resultados) { Write-Host $linha }
+    if ($ok) { Write-Host 'RESULTADO: OK' } else { Write-Host 'RESULTADO: FALHOU' }
+    if ($transcricao) {
+        try {
+            Stop-Transcript | Out-Null
+            LimparTranscricao $transcricao
+            $coleta.Add($transcricao)
+        } catch { Write-Host "aviso: transcricao: $($_.Exception.Message)" }
+    }
+    if ($coleta.Count -gt 0) {
+        try {
+            $zip = Join-Path $Amb.downloads "kryptos-sonda-$carimbo.zip"
+            Compress-Archive -Path $coleta.ToArray() -DestinationPath $zip -Force
+            $n = @((Get-ChildItem -LiteralPath $coleta.ToArray())).Count
+            Write-Host "Para anexar: $zip ($n arquivos: medidas, logcat, analise e esta janela; $([math]::Round((Get-Item -LiteralPath $zip).Length / 1KB)) KB)"
+        } catch { Write-Host "FALHA ao montar o zip: $($_.Exception.Message). Os arquivos estao em $($Amb.downloads)" }
+    }
 }
 
-if ($ok) { Write-Host 'RESULTADO: OK'; exit 0 }
-Write-Host 'RESULTADO: FALHOU'
+if ($ok) { exit 0 }
 exit 1

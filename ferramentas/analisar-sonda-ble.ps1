@@ -171,8 +171,10 @@ try {
     }
 
     # ---------- AMBOS ----------
-    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'ambos' } | Group-Object { "$($_.Aparelho) $($_.C['desfecho'])" })) {
-        $resultados.Add("OK    ambos $($g.Group[0].Aparelho): desfecho=$($g.Group[0].C['desfecho']) $($g.Count)x")
+    # desfecho=colisao (09/11/2026): os dois conectaram e o OLA desempatou; este= diz o papel que ficou.
+    foreach ($g in @($medidas | Where-Object { $_.Evento -eq 'ambos' } | Group-Object { "$($_.Aparelho) $($_.C['desfecho']) $($_.C['este'])" })) {
+        $este = if ($g.Group[0].C.ContainsKey('este')) { " este=$($g.Group[0].C['este'])" } else { '' }
+        $resultados.Add("OK    ambos $($g.Group[0].Aparelho): desfecho=$($g.Group[0].C['desfecho'])$este $($g.Count)x")
     }
 
     # ---------- calibracao ----------
