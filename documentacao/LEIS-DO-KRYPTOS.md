@@ -73,6 +73,27 @@ Estas leis valem acima de qualquer decisão técnica, recomendação, regra de t
 - Apagar tudo de emergência.
 
 
+## Lei 9. Só mensagem de texto, e nada salvo
+
+- O Kryptos só manda texto. Sem áudio, vídeo, foto, arquivo, chamada de voz ou chamada de vídeo.
+- Motivo: no WhatsApp, até a mídia de "visualização única" fica gravada na pasta do app. No Kryptos, nada do que foi lido fica no aparelho.
+- O que vale para o texto vale sem exceção: depois de lido, nada salvo (Lei 3).
+
+
+## Lei 10. Kryptos Empresa
+
+- Existe uma linha para empresas e órgãos, ao lado do Kryptos para pessoas.
+- O painel da empresa gerencia licenças, contatos internos e revogação de acesso, e nunca vê mensagem.
+- Tudo que vale para o Kryptos vale para o Kryptos Empresa. O painel não cria rastro de quem fala com quem.
+
+
+## Lei 11. Código fechado
+
+- O código do Kryptos não é aberto.
+- A confiança vem de auditoria externa publicada, não de código aberto.
+- Bibliotecas de terceiros só com licença que permite código fechado, com o aviso de licença que elas exigem (Lei 6: AGPL e GPL ficam fora).
+
+
 ## Conflitos abertos
 
 Decisões já tomadas que contrariam uma lei. Não seguir até o Gabriel decidir a correção.
@@ -84,3 +105,4 @@ Decisões já tomadas que contrariam uma lei. Não seguir até o Gabriel decidir
 ## Histórico
 
 - 09/11/2026: versão 1. Motivo: recomendações que fugiam do que o Kryptos é fizeram o trabalho dar voltas. Exemplos: gravar as conversas no aparelho e pôr um número de cada celular no anúncio Bluetooth.
+- 09/11/2026: Leis 9 (só texto, nada salvo), 10 (Kryptos Empresa) e 11 (código fechado), decididas pelo Gabriel. Motivo da Lei 9: a mídia de visualização única do WhatsApp fica gravada na pasta do app.
