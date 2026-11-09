@@ -12,6 +12,9 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -RelayPublico -TelaLivre
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -LerSonda
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -SondaBle -Conferir
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo -Alcance
 #
 # Sem parametro: exige um unico celular no cabo. Com mais de um, use -Todos ou -Serial.
 #
@@ -43,6 +46,19 @@
 # arquivos pelo run-as (so app de debug) para Downloads, num zip de nome unico, e roda o
 # ferramentas\analisar-sonda-ble.ps1. Nao combina com -Relay nem -RelayPublico.
 #
+# -SondaBle com -Conferir, -Autonomo ou -Alcance: sem tocar na tela. A permissao de
+# Bluetooth e dada pelo adb (pm grant, conferida no dumpsys) e o ferramentas\sonda-roteiro.ps1
+# conduz a sonda pelo cabo, por um arquivo de comando na pasta privada do app.
+#   -Conferir: um celular basta (ou cada um, com -Todos). Confere as pecas que o teste de
+#     dois celulares precisa: o comando chega, L2CAP abre escuta, anuncia, recusa comando
+#     errado, para, roteiro, procura sem o outro, recusa com o app fora da frente. Traz as
+#     medidas sem a analise (sem o outro celular nao ha calibracao).
+#   -Autonomo: os dois no cabo, a 1 m: calibra e mede os tres caminhos de volta nos dois
+#     sentidos, AMBOS 3 vezes e o ciclo de vida. Depois traz as medidas e analisa.
+#   -Alcance: carrega o roteiro de distancias (o segundo celular procura, o primeiro
+#     anuncia); voce tira os cabos, leva os celulares a cada distancia e toca PROXIMO
+#     PONTO; no fim, cabos de volta e FIM. Sem -Autonomo, calibra a 1 m antes.
+#
 # -LerSonda: so a leitura do -SondaBle, sem compilar, instalar nem zerar nada. Para quando
 # o -SondaBle parou depois do teste (celular que nao voltou ao cabo, janela fechada): as
 # medidas continuam nos celulares ate o proximo -SondaBle.
@@ -69,7 +85,10 @@ param(
     [switch]$RelayPublico,
     [switch]$TelaLivre,
     [switch]$SondaBle,
-    [switch]$LerSonda
+    [switch]$LerSonda,
+    [switch]$Conferir,
+    [switch]$Autonomo,
+    [switch]$Alcance
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,6 +116,7 @@ $pararCapturas = $null
 $medidasSonda = 'files/sonda-ble.txt'
 $arquivosSonda = New-Object System.Collections.Generic.List[string]
 $carimbo = Get-Date -Format 'yyyyMMdd-HHmmss'
+$automatico = $Conferir -or $Autonomo -or $Alcance
 $arqEnderecoPublico = Join-Path (Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Kryptos') 'relay-publico') 'endereco.txt'
 $enderecoPublico = $null
 
@@ -132,7 +152,7 @@ function Achar([string]$Pasta, [string[]]$Nomes) {
 # Traz o arquivo de medidas da sonda de cada celular (run-as, so app de debug), grava em
 # Downloads, le de volta, zipa e roda o analisar-sonda-ble.ps1. Usada pelo -SondaBle depois
 # do FIM e pelo -LerSonda.
-function LerEAnalisarSonda {
+function LerEAnalisarSonda([switch]$SemAnalise) {
     Passo 'celulares de volta no cabo' {
         $limite = (Get-Date).AddSeconds(180)
         do {
@@ -144,7 +164,7 @@ function LerEAnalisarSonda {
             Start-Sleep -Seconds 3
         } while ((Get-Date) -lt $limite)
         if ($faltam.Count -gt 0) { throw "em 180 s nao voltaram ao cabo: $((@($faltam | ForEach-Object { $_.Modelo })) -join ', '). As medidas continuam nos celulares: com os dois no cabo, rode o mesmo script com -Todos -LerSonda" }
-        'os dois'
+        "$($aparelhos.Count) de $($aparelhos.Count)"
     }
     foreach ($a in $aparelhos) {
         $modeloArq = ($a.Modelo.ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
@@ -165,6 +185,7 @@ function LerEAnalisarSonda {
         Compress-Archive -Path $arquivosSonda.ToArray() -DestinationPath $zip
         "$zip ($([math]::Round((Get-Item -LiteralPath $zip).Length / 1KB)) KB), pronto para anexar"
     }
+    if ($SemAnalise) { return }
     $ps = (Get-Process -Id $PID).Path
     $antes = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -183,6 +204,8 @@ try {
     if ($Relay -and $RelayPublico) { throw 'use -Relay ou -RelayPublico, nao os dois' }
     if (($SondaBle -or $LerSonda) -and ($Relay -or $RelayPublico)) { throw 'a sonda BLE nao usa relay: -SondaBle e -LerSonda nao combinam com -Relay nem -RelayPublico' }
     if ($SondaBle -and $LerSonda) { throw 'use -SondaBle (teste inteiro) ou -LerSonda (so a leitura), nao os dois' }
+    if ($automatico -and -not $SondaBle) { throw '-Conferir, -Autonomo e -Alcance sao modos da sonda: use junto com -SondaBle' }
+    if ($Conferir -and ($Autonomo -or $Alcance)) { throw '-Conferir e a conferencia com um celular: nao combina com -Autonomo nem -Alcance' }
     $flutter = Achar (Join-Path $Amb.flutter 'bin') @('flutter.bat', 'flutter')
     $adb = Achar (Join-Path $Amb.android_sdk 'platform-tools') @('adb.exe', 'adb')
     $app = Join-Path (Join-Path $Repo 'frontend') 'app'
@@ -210,7 +233,7 @@ try {
             if ($lista.Count -ne 1) { throw "ha $($lista.Count) celulares ligados ($descricao). Use -Todos ou -Serial <serial>" }
             $escolhidos = @($lista)
         }
-        if (($SondaBle -or $LerSonda) -and $escolhidos.Count -ne 2) { throw "a sonda BLE precisa de dois celulares, um de cada papel; escolhidos: $($escolhidos.Count). Ligue os dois no cabo e use -Todos" }
+        if (($SondaBle -or $LerSonda) -and -not $Conferir -and $escolhidos.Count -ne 2) { throw "a sonda BLE precisa de dois celulares, um de cada papel; escolhidos: $($escolhidos.Count). Ligue os dois no cabo e use -Todos (com um so: -SondaBle -Conferir)" }
         $script:aparelhos = $escolhidos
         (@($escolhidos | ForEach-Object { "$($_.Modelo), Android $($_.Android)" }) -join ' | ')
     }
@@ -392,6 +415,19 @@ try {
                 $estadoWifi = if ($w -match 'disabled') { 'desligado' } elseif ($w -match 'enabled') { 'ligado' } else { $w }
                 "ligado; Wi-Fi $estadoWifi (mantenha igual em todas as rodadas)"
             }
+            if ($automatico) {
+                # Sem tocar na tela: a permissao "dispositivos por perto" pelo adb, e
+                # conferida no app instalado (o que grava e provado lendo de volta).
+                Passo "$modeloAtual : Bluetooth permitido pelo adb (pm grant)" {
+                    foreach ($p in @('BLUETOOTH_SCAN', 'BLUETOOTH_ADVERTISE', 'BLUETOOTH_CONNECT')) {
+                        Rodar $adb @('-s', $s, 'shell', 'pm', 'grant', $Pacote, "android.permission.$p") | Out-Null
+                    }
+                    $dump = Rodar $adb @('-s', $s, 'shell', 'dumpsys', 'package', $Pacote)
+                    $semGrant = @('BLUETOOTH_SCAN', 'BLUETOOTH_ADVERTISE', 'BLUETOOTH_CONNECT' | Where-Object { $dump -notmatch "android\.permission\.$_`: granted=true" })
+                    if ($semGrant.Count -gt 0) { throw "depois do pm grant, o dumpsys ainda nao mostra concedida: $($semGrant -join ', ')" }
+                    'as tres concedidas e conferidas no dumpsys; nenhuma de localizacao'
+                }
+            }
             Passo "$modeloAtual : medidas da sonda zeradas" {
                 Rodar $adb @('-s', $s, 'shell', 'run-as', $Pacote, 'rm', '-f', $medidasSonda) | Out-Null
                 # Sem sh -c: o adb junta os argumentos numa linha e o shell do celular le de
@@ -438,6 +474,9 @@ try {
                     return 'SEM CONFERENCIA: o aviso de permissao do Android esta na tela (janela do sistema, fora do FLAG_SECURE). Toque Permitir no celular; a tela segura e conferida quando a permissao ja foi dada'
                 }
             }
+            # System.Drawing so existe no Windows: fora dele (calibracao na maquina do
+            # Claude, com adb falso) a captura fica sem conferencia, e o resultado diz.
+            if ($env:OS -ne 'Windows_NT') { return 'SEM CONFERENCIA: a captura so e conferida no Windows (System.Drawing)' }
             $modeloArq = ($modeloAtual.ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
             $destino = Join-Path $Amb.downloads ("kryptos-tela-$modeloArq-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.png')
             $remoto = '/sdcard/kryptos-tela.png'
@@ -472,7 +511,49 @@ try {
         }
     }
 
-    if ($Relay -or $RelayPublico -or $SondaBle) {
+    if ($SondaBle -and $automatico) {
+        $ps = (Get-Process -Id $PID).Path
+        $roteiro = Join-Path $PSScriptRoot 'sonda-roteiro.ps1'
+        $seriaisArg = (@($aparelhos | ForEach-Object { $_.Serial })) -join ','
+        $modelosArg = (@($aparelhos | ForEach-Object { $_.Modelo })) -join ','
+        $roteiroOk = $true
+        $etapas = @()
+        if ($Conferir) { $etapas += , @('Conferir') }
+        if ($Autonomo) { $etapas += , @('UmMetro') }
+        if ($Alcance) { $etapas += , @(@('Alcance') + $(if ($Autonomo) { @('-SemCalibrar') } else { @() })) }
+        foreach ($etapa in $etapas) {
+            $resultados.Add("..    sonda-roteiro.ps1 -Modo $($etapa[0]):")
+            Write-Host ".. sonda-roteiro.ps1 -Modo $($etapa[0]) (as linhas abaixo sao o andamento)"
+            $antes = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $argsRoteiro = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $roteiro, '-Modo', $etapa[0], '-Adb', $adb, '-Seriais', $seriaisArg, '-Modelos', $modelosArg) + @($etapa | Select-Object -Skip 1)
+                & $ps @argsRoteiro 2>&1 | ForEach-Object {
+                    $l = "$_"
+                    Write-Host "   $l"
+                    if ($l -match '^(OK|AVISO|FALHA|RESULTADO)') { $resultados.Add("      $l") }
+                }
+            } finally { $ErrorActionPreference = $antes }
+            if ($LASTEXITCODE -ne 0) { $roteiroOk = $false; break }
+        }
+        if ($roteiroOk -and $Alcance) {
+            Write-Host ''
+            Write-Host 'Roteiro de alcance carregado. Agora:'
+            Write-Host '  1. Tire os dois cabos. Nos dois celulares, Nao perturbe ligado e a sonda aberta na frente.'
+            Write-Host '  2. Trena, linha reta, sem parede. Leve os celulares a distancia que o celular que procura mostra.'
+            Write-Host '  3. Toque PROXIMO PONTO no celular que procura e nao mexa ate aparecer o proximo ponto.'
+            Write-Host '  4. Quando aparecer roteiro-fim (ou nada mais achar), ligue os dois no cabo e digite FIM aqui.'
+            try { $Host.UI.RawUI.FlushInputBuffer() } catch { Write-Host "   aviso: nao consegui limpar o buffer do teclado; so FIM encerra" }
+            $inicioDaEspera = Get-Date
+            do { $resposta = Read-Host 'Digite FIM para encerrar' } while ($resposta.Trim().ToUpperInvariant() -ne 'FIM')
+            $resultados.Add("OK    espera do alcance: $([math]::Round(((Get-Date) - $inicioDaEspera).TotalMinutes, 1)) min")
+        }
+        # As medidas vem mesmo quando o roteiro falhou: sao o rastro do que aconteceu.
+        LerEAnalisarSonda -SemAnalise:$Conferir
+        if (-not $roteiroOk) { throw 'o roteiro da sonda falhou (ver acima); as medidas foram trazidas para o rastro' }
+    }
+
+    if ($Relay -or $RelayPublico -or ($SondaBle -and -not $automatico)) {
         Write-Host ''
         if ($SondaBle) {
             Write-Host 'Sonda BLE aberta nos dois celulares. Faca o roteiro de'

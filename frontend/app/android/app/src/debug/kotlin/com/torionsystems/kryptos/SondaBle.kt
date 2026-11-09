@@ -35,6 +35,8 @@ import android.os.ParcelUuid
 import android.os.SystemClock
 import android.util.Log
 import android.view.WindowManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import java.io.BufferedInputStream
@@ -65,6 +67,13 @@ import java.util.concurrent.Executors
  *    L2CAP (canal L2CAP orientado a conexão, sem pareamento).
  *  - AMBOS: os dois papéis ao mesmo tempo; o desempate é uma espera aleatória antes de
  *    conectar, sem nenhum dado a mais no anúncio.
+ *
+ * Comandos do script (ferramentas/sonda-roteiro.ps1): o script grava uma linha em
+ * files/sonda-comando.txt pelo run-as (só app de debug, só pelo cabo; nenhum outro app
+ * escreve ali) e a sonda lê a cada 250 ms, executa e marca "comando" ao receber e
+ * "comando-fim" ao terminar. Com o app fora da frente, o comando é recusado (decisão 3).
+ * Roteiro de alcance: o script carrega distâncias e combinações antes de os celulares
+ * saírem do cabo; em cada ponto a pessoa toca PRÓXIMO PONTO e a sonda roda as rodadas.
  *
  * O que vai para o log e para o arquivo de medidas: só códigos e números (regra 8.2). Nem o
  * endereço Bluetooth do outro aparelho, que é um identificador.
@@ -112,6 +121,13 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         // O texto vai num Intent; acima de ~1 MB o Android recusa (TransactionTooLarge).
         // Estimo uma sessão inteira em dezenas de KB (a de 08/11/2026 teve 12 KB).
         const val COMPARTILHAR_MAX_BYTES = 400_000L
+        const val ARQUIVO_COMANDO = "sonda-comando.txt"
+        const val COMANDO_MAX_BYTES = 1_024L
+        const val INTERVALO_COMANDO_MS = 250L
+        // Entre duas rodadas do roteiro: o mesmo intervalo do roteiro feito à mão
+        // (5 procuras em 30 s), com folga.
+        const val ESPERA_ENTRE_RODADAS_MS = 6_500L
+        val ACOES = setOf("inventario", "anunciar", "procurar", "calibrar", "ambos", "parar", "l2cap-teste", "roteiro")
 
         val PERMISSOES = arrayOf(
             Manifest.permission.BLUETOOTH_SCAN,
@@ -152,8 +168,12 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
 
     private fun medida(evento: String, campos: String) = registrar("MEDIDA sonda-ble $evento $campos")
 
-    private fun falha(codigo: String, campos: String = "") =
+    private var ultimaFalha = ""
+
+    private fun falha(codigo: String, campos: String = "") {
+        ultimaFalha = codigo
         registrar("FALHA sonda-ble $codigo${if (campos.isEmpty()) "" else " $campos"}")
+    }
 
     private fun ocupado(sim: Boolean) = principal.post { canal.invokeMethod("ocupado", sim) }
 
@@ -161,7 +181,12 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "permissoes" -> pedirPermissoes(result)
+            "permissoes" -> {
+                // A tela da sonda abriu: só então a sonda passa a ler comandos.
+                h.post { iniciarComandos() }
+                pedirPermissoes(result)
+            }
+            "proximo" -> h.post { proximoPonto(); principal.post { result.success(null) } }
             "inventario" -> h.post {
                 val t = inventario()
                 principal.post { result.success(t) }
@@ -177,9 +202,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                     calibrar = call.argument<Boolean>("calibrar") ?: false,
                     volta = call.argument<String>("volta") ?: "NOTIFICACAO",
                 )
-                if (cfg.phy !in setOf("1M", "2M", "CODED") || cfg.prioridade !in setOf("PADRAO", "ALTA") ||
-                    cfg.repeticoes !in 1..50 || cfg.distancia < 0 || cfg.volta !in CAMINHOS
-                ) {
+                if (!configValida(cfg)) {
                     result.error("ARGUMENTO", "configuracao fora do esperado", null)
                     return
                 }
@@ -193,6 +216,245 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             "compartilhar" -> h.post { compartilhar(result) }
             else -> result.notImplemented()
         }
+    }
+
+    private fun configValida(cfg: Config) =
+        cfg.phy in setOf("1M", "2M", "CODED") && cfg.prioridade in setOf("PADRAO", "ALTA") &&
+            cfg.repeticoes in 1..50 && cfg.distancia >= 0 && cfg.volta in CAMINHOS
+
+    // ---------- comandos do script ----------
+
+    private val arquivoComando = File(activity.filesDir, ARQUIVO_COMANDO)
+    private var lendoComandos = false
+    private val verComandoPeriodico = object : Runnable {
+        override fun run() {
+            verComando()
+            h.postDelayed(this, INTERVALO_COMANDO_MS)
+        }
+    }
+    // Comando do script que abriu a rodada de cliente em andamento, e como ela terminou.
+    private var comandoCliente: String? = null
+    private var desfechoCliente = "parou"
+    private var codigoDesfecho = ""
+
+    private fun iniciarComandos() {
+        if (lendoComandos) return
+        lendoComandos = true
+        // Comando que sobrou de antes de abrir não vale: o script manda de novo.
+        if (arquivoComando.exists() && !arquivoComando.delete()) Log.e(TAG, "FALHA sonda-ble COMANDO_ANTIGO")
+        h.post(verComandoPeriodico)
+    }
+
+    private fun verComando() {
+        if (!arquivoComando.exists()) return
+        val tamanho = arquivoComando.length()
+        val texto = try {
+            if (tamanho > COMANDO_MAX_BYTES) null else arquivoComando.readText(Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.e(TAG, "FALHA sonda-ble COMANDO_LER ${e.javaClass.simpleName}")
+            null
+        }
+        if (!arquivoComando.delete()) Log.e(TAG, "FALHA sonda-ble COMANDO_NAO_APAGOU")
+        if (texto == null) { falha("COMANDO_INVALIDO", "motivo=ilegivel bytes=$tamanho"); return }
+        // O app tem de estar na frente (decisão 3). O estado do ciclo de vida se lê na
+        // thread principal.
+        principal.post {
+            val naFrente = (activity as? LifecycleOwner)?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) ?: false
+            h.post { executarComando(texto.trim(), naFrente) }
+        }
+    }
+
+    private fun lerCampos(t: String): Map<String, String> =
+        t.split(Regex("\\s+")).mapNotNull { p ->
+            val i = p.indexOf('=')
+            if (i <= 0) null else p.substring(0, i) to p.substring(i + 1)
+        }.toMap()
+
+    private fun fimComando(id: String, desfecho: String, codigo: String = "") =
+        medida("comando-fim", "id=$id desfecho=$desfecho${if (codigo.isEmpty()) "" else " codigo=$codigo"}")
+
+    private fun executarComando(t: String, naFrente: Boolean) {
+        val c = lerCampos(t)
+        val id = c["id"]?.takeIf { it.matches(Regex("[0-9]{1,6}")) }
+        if (id == null) { falha("COMANDO_INVALIDO", "motivo=sem_id"); return }
+        val acao = c["acao"]?.takeIf { it in ACOES }
+        if (acao == null) { falha("COMANDO_INVALIDO", "id=$id motivo=acao"); fimComando(id, "recusado"); return }
+        medida("comando", "id=$id acao=$acao")
+        if (!naFrente) { falha("COMANDO_FORA_DA_FRENTE", "id=$id"); fimComando(id, "recusado", "COMANDO_FORA_DA_FRENTE"); return }
+        when (acao) {
+            "inventario" -> { inventario(); fimComando(id, "ok") }
+            "parar" -> { parar("PEDIDO"); fimComando(id, "ok") }
+            "anunciar" -> {
+                val antes = servidor
+                iniciarServidor("PAPEIS")
+                if (servidor != null && antes == null) fimComando(id, "ok") else fimComando(id, "nao_comecou", ultimaFalha)
+            }
+            "l2cap-teste" -> { val ok = testarL2cap(); fimComando(id, if (ok) "ok" else "falha", if (ok) "" else ultimaFalha) }
+            "roteiro" -> carregarRoteiro(id, c)
+            else -> {
+                val cfg = configDoComando(c, acao)
+                if (cfg == null) { falha("COMANDO_INVALIDO", "id=$id motivo=configuracao"); fimComando(id, "recusado"); return }
+                if (cliente != null || roteiro != null) { falha("CLIENTE_JA_ATIVO", "id=$id"); fimComando(id, "recusado", "CLIENTE_JA_ATIVO"); return }
+                comandoCliente = id
+                desfechoCliente = "parou"
+                codigoDesfecho = ""
+                if (cfg.modo == "AMBOS") iniciarServidor("AMBOS")
+                iniciarCliente(cfg)
+                // Recusado antes de começar (PROCURA_DEMAIS, Bluetooth desligado...): a
+                // rodada não abriu e o pararCliente não vai marcar o fim.
+                if (cliente == null && comandoCliente == id) {
+                    comandoCliente = null
+                    fimComando(id, "nao_comecou", ultimaFalha)
+                }
+            }
+        }
+    }
+
+    private fun configDoComando(c: Map<String, String>, acao: String): Config? {
+        val calibrar = acao == "calibrar"
+        val cfg = Config(
+            modo = if (acao == "ambos") "AMBOS" else "PAPEIS",
+            phy = c["phy"] ?: "1M",
+            prioridade = c["prioridade"] ?: "PADRAO",
+            distancia = c["distancia"]?.toIntOrNull() ?: 1,
+            repeticoes = c["repeticoes"]?.toIntOrNull() ?: if (calibrar) 3 else 5,
+            calibrar = calibrar,
+            volta = c["volta"] ?: "NOTIFICACAO",
+        )
+        // A calibração depende de 3 rodadas: sabotagem na 1ª e na 2ª, nada na 3ª.
+        if (calibrar && cfg.repeticoes < 3) return null
+        return if (configValida(cfg)) cfg else null
+    }
+
+    /** Um aparelho só: a escuta L2CAP abre e dá um PSM da faixa dinâmica do BLE (0x80 a 0xFF). */
+    private fun testarL2cap(): Boolean {
+        if (!pronto()) return false
+        return try {
+            val e = adaptador!!.listenUsingInsecureL2capChannel()
+            val psm = e.psm
+            fecharQuieto(e)
+            val valido = psm in 0x80..0xFF
+            medida("l2cap-teste", "resultado=${if (valido) "ok" else "psm_fora"} psm=$psm")
+            if (!valido) ultimaFalha = "L2CAP_PSM_FORA"
+            valido
+        } catch (e: IOException) {
+            falha("L2CAP_ESCUTA", "erro=${e.javaClass.simpleName}")
+            false
+        }
+    }
+
+    // ---------- roteiro de alcance ----------
+
+    private class Combo(val phy: String, val prioridade: String, val volta: String)
+
+    private class Roteiro(val distancias: List<Int>, val combos: List<Combo>, val repeticoes: Int) {
+        var ponto = 0
+        var combo = 0
+        var aguardandoToque = true
+        var naoAchouNoPonto = 0
+    }
+
+    private var roteiro: Roteiro? = null
+    // A rodada de cliente em andamento foi aberta pelo roteiro.
+    private var rodadaDoRoteiro = false
+
+    private fun carregarRoteiro(id: String, c: Map<String, String>) {
+        if (cliente != null || roteiro != null) { falha("CLIENTE_JA_ATIVO", "id=$id"); fimComando(id, "recusado", "CLIENTE_JA_ATIVO"); return }
+        val distancias = c["distancias"]?.split(',')?.map { it.toIntOrNull() ?: -1 } ?: emptyList()
+        val combos = c["combos"]?.split(',')?.map { texto ->
+            val p = texto.split('-')
+            if (p.size == 3) Combo(p[0], p[1], p[2]) else Combo("", "", "")
+        } ?: emptyList()
+        val repeticoes = c["repeticoes"]?.toIntOrNull() ?: 5
+        val ok = distancias.size in 1..10 && distancias.all { it in 1..500 } &&
+            combos.size in 1..6 && repeticoes in 1..50 &&
+            combos.all { configValida(Config("PAPEIS", it.phy, it.prioridade, 1, repeticoes, false, it.volta)) }
+        if (!ok) { falha("COMANDO_INVALIDO", "id=$id motivo=roteiro"); fimComando(id, "recusado"); return }
+        roteiro = Roteiro(distancias, combos, repeticoes)
+        medida(
+            "roteiro",
+            "evento=carregado distancias=${distancias.joinToString(",")} " +
+                "combos=${combos.joinToString(",") { "${it.phy}-${it.prioridade}-${it.volta}" }} repeticoes=$repeticoes",
+        )
+        fimComando(id, "ok")
+        ocupado(true)
+        avisarRoteiro()
+    }
+
+    private fun avisarRoteiro() {
+        val r = roteiro
+        val (texto, aguardando) = when {
+            r == null -> "" to false
+            r.aguardandoToque -> "Leve os dois celulares a ${r.distancias[r.ponto]} m um do outro e toque PRÓXIMO PONTO " +
+                "(ponto ${r.ponto + 1} de ${r.distancias.size})" to true
+            else -> "Medindo a ${r.distancias[r.ponto]} m: rodada ${r.combo + 1} de ${r.combos.size}. Não mexa nos celulares." to false
+        }
+        principal.post { canal.invokeMethod("roteiro", mapOf("texto" to texto, "aguardando" to aguardando)) }
+    }
+
+    /** O toque em PRÓXIMO PONTO: roda as combinações na distância da vez. */
+    private fun proximoPonto() {
+        val r = roteiro ?: return
+        if (!r.aguardandoToque) return
+        r.aguardandoToque = false
+        r.combo = 0
+        r.naoAchouNoPonto = 0
+        medida("roteiro-ponto", "distancia=${r.distancias[r.ponto]} evento=comecou")
+        rodarCombo()
+    }
+
+    private fun rodarCombo() {
+        val r = roteiro ?: return
+        if (r.aguardandoToque || cliente != null) return
+        val k = r.combos[r.combo]
+        avisarRoteiro()
+        desfechoCliente = "parou"
+        codigoDesfecho = ""
+        rodadaDoRoteiro = true
+        iniciarCliente(Config("PAPEIS", k.phy, k.prioridade, r.distancias[r.ponto], r.repeticoes, false, k.volta))
+        if (cliente == null && rodadaDoRoteiro) {
+            // Não abriu. Procura demais: espera a janela e tenta a mesma de novo.
+            rodadaDoRoteiro = false
+            if (ultimaFalha == "PROCURA_DEMAIS") { h.postDelayed({ rodarCombo() }, ESPERA_ENTRE_RODADAS_MS); return }
+            desfechoCliente = "nao_comecou"
+            codigoDesfecho = ultimaFalha
+            depoisDaRodadaDoRoteiro()
+        }
+    }
+
+    /** Chamado pelo pararCliente: a rodada do roteiro terminou (bem ou mal). */
+    private fun roteiroAposRodada() {
+        if (!rodadaDoRoteiro) return
+        rodadaDoRoteiro = false
+        h.post { depoisDaRodadaDoRoteiro() }
+    }
+
+    private fun depoisDaRodadaDoRoteiro() {
+        val r = roteiro ?: return
+        if (codigoDesfecho == "NAO_ACHOU_30S") r.naoAchouNoPonto++
+        r.combo++
+        if (r.combo < r.combos.size) {
+            avisarRoteiro()
+            h.postDelayed({ rodarCombo() }, ESPERA_ENTRE_RODADAS_MS)
+            return
+        }
+        val d = r.distancias[r.ponto]
+        medida("roteiro-ponto", "distancia=$d evento=fim rodadas=${r.combos.size} nao_achou=${r.naoAchouNoPonto}")
+        // Nenhuma combinação achou o outro: daqui para longe também não vai achar.
+        if (r.naoAchouNoPonto == r.combos.size) { fimRoteiro("SEM_ALCANCE_A_${d}M"); return }
+        r.ponto++
+        if (r.ponto == r.distancias.size) { fimRoteiro("COMPLETO"); return }
+        r.aguardandoToque = true
+        avisarRoteiro()
+    }
+
+    private fun fimRoteiro(motivo: String) {
+        val r = roteiro ?: return
+        roteiro = null
+        rodadaDoRoteiro = false
+        medida("roteiro-fim", "motivo=$motivo pontos_feitos=${r.ponto}/${r.distancias.size}")
+        avisarRoteiro()
+        if (cliente == null && servidor == null) ocupado(false)
     }
 
     // ---------- enviar as medidas como texto ----------
@@ -840,6 +1102,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         // Quem recebeu a conexão antes de conectar fica de servidor.
         if (cliente != null && gatt == null) {
             medida("ambos", "desfecho=servidor")
+            desfechoCliente = "servidor"
             pararCliente()
         }
     }
@@ -1031,6 +1294,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private fun conectar(cfg: Config, d: BluetoothDevice) {
         if (cfg.modo == "AMBOS" && clienteDoServidor != null) {
             medida("ambos", "desfecho=servidor")
+            desfechoCliente = "servidor"
             pararCliente()
             return
         }
@@ -1425,10 +1689,13 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     }
 
     private fun terminarRodada(cfg: Config) {
+        desfechoCliente = "ok"
+        codigoDesfecho = ""
         medida("rodada-fim", "${campos(cfg)} idas_ok=$idasOk/${cfg.repeticoes} voltas_ok=$voltasOk/${cfg.repeticoes}")
         if (cfg.calibrar) {
             val esperado = listOf("SHA_NAO_CONFERE", "PEDACO_FALTANDO") + List(cfg.repeticoes - 2) { "CONFERIU" }
             val ok = vistosIda == esperado && vistosVolta == esperado
+            desfechoCliente = if (ok) "calibracao_OK" else "calibracao_FALHOU"
             medida(
                 "calibracao",
                 "rodada=$rodada volta=${cfg.volta} resultado=${if (ok) "OK" else "FALHOU"} ida=${vistosIda.joinToString(",")} voltas=${vistosVolta.joinToString(",")}",
@@ -1440,6 +1707,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private fun falharCliente(codigo: String, extra: String = "") {
         val cfg = cliente
         if (cfg == null) { falha(codigo, extra); return }
+        desfechoCliente = "falha"
+        codigoDesfecho = codigo
         falha(codigo, "${campos(cfg)}${if (extra.isEmpty()) "" else " $extra"}")
         pararCliente()
     }
@@ -1461,13 +1730,21 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         } catch (e: Exception) {
             Log.e(TAG, "fechar cliente: ${e.javaClass.simpleName}")
         }
-        if (servidor == null) ocupado(false)
+        val id = comandoCliente
+        if (id != null) {
+            comandoCliente = null
+            fimComando(id, desfechoCliente, codigoDesfecho)
+        }
+        roteiroAposRodada()
+        if (servidor == null && roteiro == null) ocupado(false)
     }
 
     // =====================================================================
 
     /** Para tudo: procura, anúncio, conexão e servidor. Também quando o app sai da frente. */
     fun parar(motivo: String) {
+        // O roteiro sai antes do cliente, para a rodada interrompida não puxar a próxima.
+        if (roteiro != null) fimRoteiro(motivo)
         val haviaAlgo = cliente != null || servidor != null
         if (cliente != null) falharCliente(if (motivo == "PEDIDO") "PARADA_PEDIDA" else motivo)
         if (servidor != null) {

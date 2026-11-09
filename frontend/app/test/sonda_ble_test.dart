@@ -234,4 +234,28 @@ void main() {
     expect(find.text('ERRO ARGUMENTO'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('roteiro: PRÓXIMO PONTO só quando o Android espera a pessoa', (
+    tester,
+  ) async {
+    final a = await montar(tester, AndroidFalso());
+    expect(find.byKey(const Key('sonda-roteiro')), findsNothing);
+    const espera =
+        'Leve os dois celulares a 5 m um do outro e toque PRÓXIMO PONTO';
+    await doAndroid(tester, 'roteiro', {'texto': espera, 'aguardando': true});
+    expect(find.text(espera), findsOneWidget);
+    await tester.tap(find.byKey(const Key('sonda-proximo-ponto')));
+    await tester.pumpAndSettle();
+    expect(a.chamadas.last.method, 'proximo');
+    // Medindo: o texto fica, o botão some (um toque a mais não pula ponto).
+    await doAndroid(tester, 'roteiro', {
+      'texto': 'Medindo a 5 m: rodada 1 de 2.',
+      'aguardando': false,
+    });
+    expect(find.text('Medindo a 5 m: rodada 1 de 2.'), findsOneWidget);
+    expect(find.byKey(const Key('sonda-proximo-ponto')), findsNothing);
+    // Fim do roteiro: texto vazio, a faixa sai.
+    await doAndroid(tester, 'roteiro', {'texto': '', 'aguardando': false});
+    expect(find.byKey(const Key('sonda-roteiro')), findsNothing);
+  });
 }

@@ -109,6 +109,8 @@ Só existe no app de debug, montado com `--dart-define=KRYPTOS_SONDA_BLE=true`. 
 | `frontend/app/android/app/src/debug/AndroidManifest.xml` | `BLUETOOTH_SCAN` com `neverForLocation`, `BLUETOOTH_ADVERTISE`, `BLUETOOTH_CONNECT`; nada de localização |
 | `frontend/app/lib/sonda_ble.dart` | Tela: papel, variáveis, linhas |
 | `ferramentas/instalar-no-celular.ps1 -SondaBle` / `-LerSonda` | Monta, confere, instala, zera, espera FIM, traz as medidas e analisa |
+| `ferramentas/instalar-no-celular.ps1 -SondaBle -Conferir` / `-Autonomo` / `-Alcance` | O mesmo sem tocar na tela: permissão pelo `pm grant` e a sonda conduzida pelo `sonda-roteiro.ps1` |
+| `ferramentas/sonda-roteiro.ps1` | Manda os comandos à sonda pelo cabo e espera cada fim (chamado pelo de cima) |
 | `ferramentas/analisar-sonda-ble.ps1` | Resumo das medidas, por distância, PHY, prioridade e caminho de volta |
 
 Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige Android 13 ou mais novo (as chamadas de escrita e notificação que devolvem código); os dois celulares de teste são Android 15.
@@ -127,6 +129,12 @@ Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige And
 - **Ciclo de vida:** a tela fica acesa enquanto a sonda está aberta. Se o app sai da frente, a sonda para tudo (`APP_SAIU_DA_FRENTE`).
 - **ENVIAR MEDIDAS:** abre o "Compartilhar" do Android com o arquivo de medidas inteiro, em texto (WhatsApp, e-mail, copiar). Só com a sonda parada, porque abrir a escolha tira o app da frente. Até 400 KB; acima disso, use o `-LerSonda`. Sem medidas, a tela mostra `ERRO SEM_MEDIDAS`.
 
+**Sem tocar na tela (08/11/2026).** O script grava uma linha `id=<n> acao=<acao> chave=valor ...` em `files/sonda-comando.txt`, na pasta privada do app, pelo `run-as`: só pelo cabo e só no app de debug, então nenhum outro app do celular consegue mandar a sonda ligar o Bluetooth. A sonda lê a cada 250 ms, marca `comando` ao receber e `comando-fim` (com o desfecho) ao terminar. Com o app fora da frente, recusa (`COMANDO_FORA_DA_FRENTE`, decisão 3). O arquivo chega por `adb exec-in run-as ... tee` ou, se não der, por `adb push` e `run-as cp`; o script testa nessa ordem e diz qual valeu. A permissão "dispositivos por perto" vai pelo `pm grant`, conferida no `dumpsys`.
+
+- **`-Conferir`** (um celular basta): o comando chega; o L2CAP abre escuta; anuncia; recusa comando errado; para; carrega e cancela o roteiro; procura sozinho e dá `NAO_ACHOU_30S`; recusa com o app fora da frente e aceita de volta.
+- **`-Autonomo`** (os dois no cabo, a 1 m): calibra os três caminhos de volta e mede 1M PADRAO, 2M ALTA nos três caminhos e Coded ALTA, nos dois sentidos; AMBOS 3 vezes, os dois soltos juntos; ciclo de vida com o botão de início no meio das idas. Estimo de 15 a 20 min.
+- **`-Alcance`**: o primeiro celular anuncia; o segundo calibra a 1 m (sem `-Autonomo`) e recebe o roteiro (5, 10, 15, 20 e 30 m; 1M PADRAO e Coded ALTA; 3 repetições). Sem cabo, em cada ponto a pessoa toca **PRÓXIMO PONTO** no celular que procura. O roteiro para sozinho no ponto em que nenhuma combinação achou o outro (`roteiro-fim motivo=SEM_ALCANCE_A_<d>M`).
+
 **Variáveis**, escolhidas na tela, uma por rodada: PHY (1M, 2M, CODED), prioridade (PADRAO, ALTA), caminho de volta (NOTIFICACAO, ESCRITA, L2CAP) e a distância declarada (1, 5, 10, 15, 20, 30 m). Quem escolhe é o celular que procura.
 
 **Linhas.** O formato é `<hora> MEDIDA sonda-ble <evento> chave=valor ...` e `<hora> FALHA sonda-ble <CODIGO> ...`. Elas vão para o logcat (tag `KryptosSonda`), para a tela e para `files/sonda-ble.txt`, na pasta privada do app (no máximo 2 MiB). Só códigos e números: nem o endereço Bluetooth do outro aparelho.
@@ -142,8 +150,13 @@ Nenhuma dependência nova: só a API do Android (platform 36). A sonda exige And
 | `ida`, `volta` | n, bytes, pedacos, ms, kbps, resultado, recebidos, ms_receptor, ocupado, rssi (só na ida) |
 | `servidor-recebeu`, `servidor-enviou` | o mesmo, do lado do servidor; `servidor-enviou` leva o caminho (no L2CAP, ocupado e mtu saem `-`) |
 | `rodada-fim`, `calibracao`, `ambos`, `parou` | o desfecho de cada rodada; `calibracao` leva volta (o caminho) e as listas ida e voltas |
+| `comando`, `comando-fim` | id e acao; desfecho (`ok`, `calibracao_OK`, `servidor`, `falha`, `nao_comecou`, `recusado`) e o código |
+| `l2cap-teste` | resultado, psm (um aparelho só, `-Conferir`) |
+| `roteiro`, `roteiro-ponto`, `roteiro-fim` | distâncias e combinações carregadas; começo e fim de cada ponto; motivo do fim |
 
 Códigos de FALHA: `ANDROID_ANTIGO`, `SEM_PERMISSAO`, `SEM_BLUETOOTH`, `BLUETOOTH_DESLIGADO`, `PROCURA_DEMAIS`, `NAO_ACHOU_30S`, `CONEXAO_CAIU` (com o status), `TEMPO_ESGOTADO` (com a etapa), `MTU`, `ESCRITA*`, `NOTIFICACAO*`, `ANUNCIO_LEGADO`, `ANUNCIO_CODED`, `QUADRO_INVALIDO`, `APP_SAIU_DA_FRENTE`, `PARADA_PEDIDA`.
+
+Dos comandos: `COMANDO_INVALIDO` (com o motivo), `COMANDO_FORA_DA_FRENTE`, `CLIENTE_JA_ATIVO`, `L2CAP_ESCUTA`.
 
 Dos caminhos de volta: `VOLTA_PREPARAR` (com o motivo, do lado do servidor), `VOLTA_NAO_PREPARADA`, `VOLTA_CAIU`, `SERVIDOR_VOLTA_NAO_ABRIU`, `SERVICO_VOLTA_RECUSADO`, `L2CAP_CONEXAO`, `L2CAP_CAIU`, `L2CAP_ESCRITA`.
 
@@ -167,13 +180,24 @@ Dos caminhos de volta: `VOLTA_PREPARAR` (com o motivo, do lado do servidor), `VO
 - **Caminhos de volta (08/11/2026, decisão 9):**
   - `QuadroSonda.kt`: 53 casos fora do Android (eram 33). Os novos cobrem `PREPARAR`, `PRONTO` com PSM até 65.535, o pedido da volta com o caminho, e a carta inteira passando em molduras por um fluxo que entrega no máximo 7 bytes por leitura, como um canal picotado. Duas sabotagens, cada uma pegou: sem recusar caminho desconhecido e sem recusar moldura vazia ou maior que 512 bytes.
   - Tela: os testes conferem que a VOLTA escolhida vai para o Android; sem o campo, dois falham.
-  - `analisar-sonda-ble.ps1`: separa ida e volta pelo caminho e exige uma calibração OK para cada caminho medido. Pegou: L2CAP e ESCRITA medidos só com calibração de notificação, e calibração da ESCRITA que falhou. Os arquivos de antes (sem o campo) continuam dando o mesmo resultado, como NOTIFICACAO.
+  - `analisar-sonda-ble.ps1`: separa ida e volta pelo caminho e pelo celular que procura, e exige uma calibração OK para cada caminho medido. Pegou: L2CAP e ESCRITA medidos só com calibração de notificação, e calibração da ESCRITA que falhou. Os arquivos de antes (sem o campo) continuam dando o mesmo resultado, como NOTIFICACAO.
 
 - **Defeito que o celular achou e a calibração deixou passar (08/11/2026):** a conferência do arquivo zerado usava `run-as ... sh -c "if ...; then ...; fi"`. O `adb shell` junta os argumentos numa linha só, e o shell do celular lê essa linha de novo: o `;` quebrou o comando (`syntax error: unexpected 'then'`). O `adb` falso da calibração executava os argumentos direto, sem essa segunda leitura. Agora a conferência é um `ls` de um arquivo só, sem nada para o shell interpretar, e o `adb` falso imita a segunda leitura: com ele, o script anterior falha do mesmo jeito que no celular, e o corrigido passa. Casos errados: arquivo que não apagou, `run-as` que falha e resposta inesperada do `ls`. Nenhum outro `adb shell` do script tem caractere que o shell reinterprete.
 
-O que não dá para provar aqui: o Bluetooth de verdade. Isso é o teste abaixo.
+- **Sem tocar na tela (08/11/2026):** `-Conferir`, `-Autonomo` e `-Alcance` com `adb` falso e uma sonda falsa que responde como o `SondaBle.kt`, 22 casos. Certos: um celular, dois celulares, 1 m, alcance, os dois juntos, e o `exec-in` mudo ou quebrado caindo no `push`. Errados, cada um com o motivo certo na saída: nenhuma forma de levar o comando; `pm grant` que não pegou ou foi recusado; tela que não abre; sonda que não responde; L2CAP sem escuta; sonda que aceita comando fora da frente; procura sozinha que não dá `NAO_ACHOU_30S`; comando sem fim; calibração de um caminho que falhou; um celular só no `-Autonomo`; opções que não combinam. O `-SondaBle` à mão de antes continua igual. Tela: o PRÓXIMO PONTO só aparece quando a sonda espera a pessoa; sem essa condição, o teste falha.
+- **A captura de tela** não é conferida fora do Windows (System.Drawing): o passo diz `SEM CONFERENCIA` em vez de quebrar.
+
+O que não dá para provar aqui: o Bluetooth de verdade, e se o `exec-in` ou o `run-as cp` passam no SELinux de cada aparelho. Isso é o `-Conferir` e o teste abaixo.
 
 ## Teste da sonda
+
+Sem tocar na tela (recomendado):
+
+1. Com um celular só no cabo, primeiro: `powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -SondaBle -Conferir`.
+2. Com os dois no cabo, a 1 m um do outro: `... -Todos -SondaBle -Autonomo`.
+3. Alcance, com a trena: `... -Todos -SondaBle -Alcance` (ou `-Autonomo -Alcance` junto). O primeiro celular da lista do adb anuncia e o segundo procura: o script mostra qual é qual.
+
+O roteiro à mão abaixo continua valendo.
 
 Antes:
 

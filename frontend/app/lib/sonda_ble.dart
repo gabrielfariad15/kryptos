@@ -6,6 +6,10 @@
 // Tudo o que a sonda mede vai para o logcat (tag KryptosSonda) e para um arquivo na pasta
 // privada do app, que o ferramentas/instalar-no-celular.ps1 -SondaBle lê no fim. Aqui a
 // tela só escolhe o papel e as variáveis e mostra as linhas.
+//
+// Roteiro de alcance (carregado pelo script antes de os celulares saírem do cabo): o
+// Android manda "roteiro" com o texto da vez; quando ele espera a pessoa, a tela mostra
+// PRÓXIMO PONTO.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -52,6 +56,8 @@ class _TelaSondaBleState extends State<TelaSondaBle> {
   // cliente pelo mesmo enlace) ou L2CAP. Quem escolhe é o celular que procura.
   String _volta = 'NOTIFICACAO';
   int _distancia = 1;
+  String _roteiro = '';
+  bool _roteiroAguardando = false;
   final _linhas = <String>[];
 
   @override
@@ -77,6 +83,12 @@ class _TelaSondaBleState extends State<TelaSondaBle> {
         });
       case 'ocupado':
         setState(() => _ocupado = c.arguments as bool);
+      case 'roteiro':
+        final m = (c.arguments as Map).cast<String, Object?>();
+        setState(() {
+          _roteiro = m['texto'] as String? ?? '';
+          _roteiroAguardando = m['aguardando'] == true;
+        });
     }
     return null;
   }
@@ -152,6 +164,29 @@ class _TelaSondaBleState extends State<TelaSondaBle> {
                   'ERRO $_erro',
                   key: const Key('sonda-erro'),
                   style: const TextStyle(color: Cores.laranja),
+                ),
+              if (_roteiro.isNotEmpty)
+                Container(
+                  key: const Key('sonda-roteiro'),
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Cores.ambar),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(_roteiro, style: const TextStyle(fontSize: 14)),
+                      if (_roteiroAguardando) ...[
+                        const SizedBox(height: 8),
+                        FilledButton(
+                          key: const Key('sonda-proximo-ponto'),
+                          onPressed: () => _chamar('proximo'),
+                          child: const Text('PRÓXIMO PONTO'),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               const SizedBox(height: 8),
               _escolha(

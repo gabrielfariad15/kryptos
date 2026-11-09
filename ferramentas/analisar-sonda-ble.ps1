@@ -4,8 +4,9 @@
 # instalar-no-celular.ps1 -SondaBle traz de cada celular depois do FIM, e imprime:
 #   - o que cada celular tem de radio (inventario);
 #   - anuncios, tempo ate achar, conexao (MTU, pedaco, PHY);
-#   - idas e voltas por distancia, PHY, prioridade e caminho da volta (NOTIFICACAO,
-#     ESCRITA ou L2CAP): conferidas, tempo e kbit/s (mediana, minimo, maximo) e RSSI;
+#   - idas e voltas por distancia, PHY, prioridade, caminho da volta (NOTIFICACAO,
+#     ESCRITA ou L2CAP) e celular que procura (a volta lenta de 08/11/2026 dependia de
+#     quem conecta): conferidas, tempo e kbit/s (mediana, minimo, maximo) e RSSI;
 #   - o preparo dos caminhos ESCRITA e L2CAP (quanto levou para abrir);
 #   - o lado do servidor, a calibracao, o desfecho do modo AMBOS e as falhas por codigo;
 #   - o alcance por PHY: ate onde conferiu e onde deixou de achar.
@@ -134,8 +135,8 @@ try {
 
     # ---------- idas e voltas (fora da calibracao) ----------
     $transf = @($medidas | Where-Object { ($_.Evento -eq 'ida' -or $_.Evento -eq 'volta') -and $_.C['calibrar'] -ne 'sim' })
-    foreach ($g in @($transf | Group-Object { "$($_.Evento) $($_.C['distancia']) $($_.C['phy']) $($_.C['prioridade']) $(Volta $_)" } |
-            Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] }, { $_.Group[0].C['prioridade'] }, { Volta $_.Group[0] }, { $_.Group[0].Evento })) {
+    foreach ($g in @($transf | Group-Object { "$($_.Evento) $($_.C['distancia']) $($_.C['phy']) $($_.C['prioridade']) $(Volta $_) $($_.Aparelho)" } |
+            Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] }, { $_.Group[0].C['prioridade'] }, { Volta $_.Group[0] }, { $_.Group[0].Aparelho }, { $_.Group[0].Evento })) {
         $r = $g.Group[0]
         $conf = @($g.Group | Where-Object { $_.C['resultado'] -eq 'CONFERIU' }).Count
         $msv = Valores $g.Group 'ms'
@@ -143,7 +144,7 @@ try {
         $max = ($msv | Measure-Object -Maximum).Maximum
         $rssi = if ($r.Evento -eq 'ida') { "; rssi mediana $(F (Mediana (Valores $g.Group 'rssi'))) dBm" } else { '' }
         $marca = if ($conf -eq $g.Count) { 'OK   ' } else { 'AVISO' }
-        $resultados.Add("$marca $("{0,-5}" -f $r.Evento) a $($r.C['distancia']) m, $($r.C['phy']) $($r.C['prioridade']), volta $(Volta $r): $conf de $($g.Count) conferidas; ms mediana $(F (Mediana $msv)) (min $(F $min), max $(F $max)); kbit/s mediana $(F (Mediana (Valores $g.Group 'kbps')))$rssi")
+        $resultados.Add("$marca $("{0,-5}" -f $r.Evento) a $($r.C['distancia']) m, $($r.C['phy']) $($r.C['prioridade']), volta $(Volta $r), procura $($r.Aparelho): $conf de $($g.Count) conferidas; ms mediana $(F (Mediana $msv)) (min $(F $min), max $(F $max)); kbit/s mediana $(F (Mediana (Valores $g.Group 'kbps')))$rssi")
     }
     if ($transf.Count -eq 0) { $resultados.Add('AVISO nenhuma ida ou volta fora da calibracao') }
 
