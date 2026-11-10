@@ -421,6 +421,31 @@ Arquivos `kryptos-sonda-*-20261109-024817`, commit `92fca64`.
 - **Rodada 9: um cliente só, na prática.** Mesmo cruzamento, com 0x3e nos dois lados e 133 no g15. O Edge reconectou em 1,4 s, e o g15 serviu. O script marcou AVISO, porque só aceitava `ok` com `servidor`. Corrigido (decisão 15).
 - O número de cada celular no anúncio, que eu cheguei a recomendar para evitar o cruzamento, foi rejeitado (decisão 14).
 
+## Resultado de 10/11/2026, `-Coded -Ambos -Alcance -Distancias '1,7,13'` (commit ade80bd)
+
+Resultado OK: 127 OK, 4 AVISO, 0 FALHA. Os dois celulares foram preparados sem ninguém tocar: Bluetooth reiniciado (OFF real e depois ON, enable de primeira), Não perturbe e tela, tudo de volta no fim. A captura deu tela preta nos dois.
+
+- **Coded, 3 rodadas por sentido:**
+
+  | Quem procura | CODED | CODED1M |
+  |---|---|---|
+  | g15 | 3 de 3 | 3 de 3 |
+  | Edge | 2 de 3 | 3 de 3 |
+
+  A falha do Edge foi `CONEXAO_CAIU` com status 133, na conexão. Em 10/11 de madrugada o Edge não tinha conectado nenhuma vez como central em Coded; agora conectou 2 de 3. A hipótese de que "o chip do Edge não abre Coded" fica mais fraca. O CODED1M ficou 6 de 6.
+- **AMBOS:** 10 de 10 com um cliente só e 8 colisões (4 antes do OLA, 4 pelo nonce). De novo nenhuma linha cruzada, então o plano B continua sem rodar no celular.
+- **Alcance dentro de casa, com paredes no caminho** (o Edge anunciando parado, o g15 procurando; 2 idas e voltas por ponto):
+
+  | Distância | 1M PADRÃO | CODED ALTA |
+  |---|---|---|
+  | 1 m | 2 de 2 entregues | 2 de 2 entregues |
+  | 7 m | 2 de 2 entregues (RSSI −90 dBm; ida 3,6 s, volta 25,7 s) | 2 de 2 entregues (RSSI −90 dBm; ida 10 s, volta 7,8 s) |
+  | 13 m | não achou em 30 s | achou (RSSI −96 dBm), mas a conexão caiu (133) |
+
+  Medido: **dentro de casa, com paredes, entrega até 7 m; a 13 m nada é entregue.** É um ponto de cada, numa casa só, e não mede o alcance em campo aberto nem em km. O número da tela da Lei 1 ainda depende da medida em campo aberto.
+- **O sentido lento continua:** o Edge mandando para o g15 por notificação leva cerca de 20 s para 66.594 bytes (cerca de 27 kbit/s); o contrário leva cerca de 2,4 s. Em Coded a mesma volta variou de 6,5 s a 53,9 s. O intervalo de conexão no logcat foi 12 (15 ms) nas voltas rápidas e nas lentas, então não é o intervalo que explica. A causa segue sem rastro.
+- **Para mensagem de texto (Lei 9), o tamanho muda a conta:** a sonda manda 66.594 bytes por vez, e uma mensagem de texto tem perto de 1 KB. Pela proporção, o sentido lento levaria cerca de 0,3 s por mensagem (estimativa minha; a sonda não mediu mensagem pequena).
+
 ## O que não resolve
 
 - **Linha cruzada (decisão 14):** o plano B recupera dentro da rodada, mas não impede o cruzamento. Quanto ele acontece no uso real, com os dois achando um ao outro em horas diferentes, não está medido. A espera da descoberta de serviços continua 10 s antes de o plano B entrar.
