@@ -197,6 +197,11 @@ try {
 
     # ---------- falhas ----------
     foreach ($g in @($falhas | Group-Object Evento | Sort-Object Count -Descending)) {
+        # O teste do ciclo de vida do -Autonomo aperta o botao de inicio uma vez de proposito.
+        if ($g.Name -eq 'APP_SAIU_DA_FRENTE' -and $g.Count -eq 1) {
+            $resultados.Add("OK    app saiu da frente: 1x (esperado no teste do ciclo de vida; mais de uma vez vira AVISO)")
+            continue
+        }
         $onde = (@($g.Group | Group-Object { if ($_.C.ContainsKey('distancia')) { "$($_.C['phy']) a $($_.C['distancia']) m" } else { $_.Aparelho } } |
                 ForEach-Object { "$($_.Name): $($_.Count)" })) -join '; '
         $resultados.Add("AVISO falha $($g.Name): $($g.Count)x ($onde)")

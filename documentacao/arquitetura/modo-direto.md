@@ -61,6 +61,13 @@ Decidido em 08/11/2026. Exigência de origem: `DECISOES-FASE-0.md` (seção 8) e
 15. **Resumo de todo teste em txt (09/11/2026):** `kryptos-resumo-<carimbo>.txt` em Downloads, com o resultado, o commit, os celulares e só as linhas FALHA e AVISO. É o arquivo para mandar primeiro; o zip vai quando for pedido. Também vai dentro do zip.
     - No roteiro, linha FALHA derruba o resultado (`RESULTADO: FALHOU`): rodada sem nenhum cliente ou com dois clientes é FALHA.
     - `-Autonomo -Ambos` roda tudo de uma vez. Uma etapa que falha não impede a seguinte, e o resultado final continua FALHOU.
+16. **Ajustes de 10/11/2026, depois do `-Autonomo -Ambos` de 09/11 (16 de 16 no AMBOS; nenhuma linha cruzada, então o plano B ainda não rodou no celular):**
+    - **Tempo da transferência sem progresso:** a sonda só falha quando nenhum pedaço anda por 30 s (`TEMPO_SEM_PROGRESSO_MS`), dos dois lados e nos três caminhos. Antes era o tempo total. A volta Coded no sentido lento (g15 conectando) caiu em 30 s depois de uma ida que conferiu em 7,9 s. Pela conta, essa volta leva 130 a 160 s (estimativa minha).
+    - **Coded com o Edge procurando não abriu conexão:** o g15 recebeu o pedido duas vezes, e o enlace caiu em 0,3 s com 0x3e; o Edge desistiu em 15 s. Com o g15 procurando, conectou. Foi uma rodada em cada sentido. Entrou o `phy=CODED1M` (conecta em 1M pelo anúncio legado e pede Coded S8 depois) e a etapa `-Coded` (3 rodadas de cada jeito nos dois sentidos), para separar a forma de conectar do chip. Por que o Edge falha é palpite meu (o primeiro pacote não sai a tempo), sem rastro no log.
+    - **Coded no `-Autonomo` e no alcance com 2 idas e voltas,** para a rodada caber na espera de 420 s do roteiro.
+    - **`APP_SAIU_DA_FRENTE` 1 vez é esperado** (o ciclo de vida aperta o botão de início). Mais de uma vez continua AVISO.
+    - **Celulares preparados sem tocar:** antes da sonda, o instalador desliga e liga o Bluetooth de cada celular (`cmd bluetooth_manager`), liga o Não perturbe e deixa a tela acesa no cabo, tudo conferido lendo de volta; no fim, Não perturbe e tela voltam ao que eram, mesmo se o teste falhar. O Wi-Fi não é mexido (só registrado): mudar duas coisas juntas não diria qual delas mexeu no resultado.
+    - **Aviso na hora de levar o celular:** três bipes e o nome do celular que fica e do que vai. `-Distancias` escolhe os pontos (ex.: `1,7,13` dentro de casa, com parede no caminho).
 
 ## O que a pesquisa mostrou (08/11/2026)
 

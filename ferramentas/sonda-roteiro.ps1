@@ -22,6 +22,9 @@
 #             cada): 3 com a espera aleatoria normal, 3 com espera 0 (os dois conectam
 #             juntos) e 4 com espera 0 e o OLA segurado 2 s no servidor (os dois clientes
 #             mandam o OLA antes de qualquer decisao: desempate pela comparacao do nonce).
+#   Coded     dois celulares a 1 m: uma calibracao e, nos dois sentidos, 3 rodadas em
+#             CODED (conecta em Coded) e 3 em CODED1M (conecta em 1M e troca para Coded),
+#             1 ida e volta cada (10/11/2026: o Edge procurando nao abria conexao em Coded).
 #   Alcance   dois celulares: o primeiro anuncia, o segundo calibra (sem -SemCalibrar) e
 #             recebe o roteiro de distancias; depois a pessoa tira os cabos e toca PROXIMO
 #             PONTO em cada distancia.
@@ -35,7 +38,7 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('Conferir', 'UmMetro', 'Ambos', 'Alcance')][string]$Modo,
+    [Parameter(Mandatory = $true)][ValidateSet('Conferir', 'UmMetro', 'Coded', 'Ambos', 'Alcance')][string]$Modo,
     [Parameter(Mandatory = $true)][string]$Adb,
     [Parameter(Mandatory = $true)][string[]]$Seriais,
     [string[]]$Modelos = @(),
@@ -67,7 +70,9 @@ $rodadas1m = @(
     'acao=procurar phy=2M prioridade=ALTA volta=NOTIFICACAO',
     'acao=procurar phy=2M prioridade=ALTA volta=ESCRITA',
     'acao=procurar phy=2M prioridade=ALTA volta=L2CAP',
-    'acao=procurar phy=CODED prioridade=ALTA volta=NOTIFICACAO'
+    # Coded: 2 idas e voltas. No sentido lento a volta leva minutos (estimo 130 a 160 s) e a
+    # rodada inteira precisa caber nos 420 s da espera do Comando.
+    'acao=procurar phy=CODED prioridade=ALTA volta=NOTIFICACAO repeticoes=2'
 )
 $combosAlcance = '1M-PADRAO-NOTIFICACAO,CODED-ALTA-NOTIFICACAO'
 
@@ -388,6 +393,31 @@ try {
         PararTodos @($a, $b)
     }
 
+    if ($Modo -eq 'Coded') {
+        $a = $Seriais[0]; $b = $Seriais[1]
+        Write-Host '.. calibracao a 1 m antes do Coded'
+        PararTodos @($a, $b)
+        Anunciar $a | Out-Null
+        $r = Rodada $b 'acao=calibrar phy=1M prioridade=PADRAO volta=NOTIFICACAO' '1 m, antes do Coded'
+        if ($r.Desfecho -ne 'calibracao_OK') { throw "a calibracao antes do Coded nao deu OK ($($r.Desfecho) $($r.Codigo))" }
+        foreach ($par in @(@($a, $b), @($b, $a))) {
+            $srv = $par[0]; $cli = $par[1]
+            Write-Host ".. Coded: $(Nome $srv) anuncia, $(Nome $cli) procura (1 m)"
+            PararTodos @($a, $b)
+            Anunciar $srv | Out-Null
+            foreach ($phy in @('CODED', 'CODED1M')) {
+                $okCoded = 0; $codigos = @()
+                for ($k = 1; $k -le 3; $k++) {
+                    $r = Rodada $cli "acao=procurar phy=$phy prioridade=ALTA volta=NOTIFICACAO repeticoes=1" "Coded $k, $(Nome $srv) anuncia"
+                    if ($r.Desfecho -eq 'ok') { $okCoded++ } else { $codigos += "$($r.Desfecho) $($r.Codigo)".Trim() }
+                }
+                $marca = if ($okCoded -eq 3) { 'OK   ' } else { 'AVISO' }
+                $resultados.Add("$marca Coded: $(Nome $cli) procurando em $phy`: $okCoded de 3$(if ($codigos) { " (falhas: $($codigos -join '; '))" })")
+            }
+        }
+        PararTodos @($a, $b)
+    }
+
     if ($Modo -eq 'Ambos') {
         # Sem calibracao, a analise nao aceita as medidas (regra 5.3): uma, a 1 m, antes.
         Write-Host '.. calibracao a 1 m antes do AMBOS'
@@ -409,9 +439,10 @@ try {
             $r = Rodada $b 'acao=calibrar phy=1M prioridade=PADRAO volta=NOTIFICACAO' '1 m, antes do alcance'
             if ($r.Desfecho -ne 'calibracao_OK') { throw "a calibracao antes do alcance nao deu OK ($($r.Desfecho) $($r.Codigo)): nao adianta medir" }
         }
-        $r = Comando $b "acao=roteiro distancias=$Distancias combos=$combosAlcance repeticoes=3" 15
+        # 2 idas e voltas por ponto: a volta Coded no sentido lento leva minutos (estimo 130 a 160 s).
+        $r = Comando $b "acao=roteiro distancias=$Distancias combos=$combosAlcance repeticoes=2" 15
         if ($r.Desfecho -ne 'ok' -or -not (EsperarLinha $b 'sonda-ble roteiro evento=carregado' $r.Desde 5)) { throw "o roteiro de alcance nao carregou no $(Nome $b) (desfecho=$($r.Desfecho))" }
-        $resultados.Add("OK    alcance: $(Nome $a) anunciando; roteiro carregado no $(Nome $b) ($Distancias m; $combosAlcance; 3 repeticoes)")
+        $resultados.Add("OK    alcance: $(Nome $a) anunciando; roteiro carregado no $(Nome $b) ($Distancias m; $combosAlcance; 2 repeticoes)")
     }
     $ok = $true
 } catch {

@@ -17,6 +17,7 @@
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo -Alcance
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Ambos
 #   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Autonomo -Ambos
+#   powershell -ExecutionPolicy Bypass -File C:\kryptos\ferramentas\instalar-no-celular.ps1 -Todos -SondaBle -Coded -Ambos -Alcance -Distancias 1,7,13
 #
 # Sem parametro: exige um unico celular no cabo. Com mais de um, use -Todos ou -Serial.
 #
@@ -60,6 +61,11 @@
 #   -Ambos: os dois no cabo, a 1 m: so o AMBOS, 5 vezes com a espera aleatoria e 5 com
 #     espera 0 (colisao provocada), para conferir o desempate pelo OLA.
 #   -Autonomo -Ambos juntos: tudo de uma vez, um zip e um resumo.
+#   -Coded: os dois no cabo, a 1 m: Coded nos dois sentidos, conectando em Coded e em 1M.
+#   Nos modos automaticos, antes da sonda e sem tocar na tela: o Bluetooth de cada celular
+#   e desligado e ligado de novo (conferido), o Nao perturbe liga e a tela fica acesa no
+#   cabo. No fim, Nao perturbe e tela voltam ao que eram, mesmo se o teste falhar.
+#   -Distancias: os pontos do -Alcance em metros (padrao 5,10,15,20,30), ex.: 1,7,13.
 #   -Alcance: carrega o roteiro de distancias (o segundo celular procura, o primeiro
 #     anuncia); voce tira os cabos, leva os celulares a cada distancia e toca PROXIMO
 #     PONTO; no fim, cabos de volta e FIM. Sem -Autonomo, calibra a 1 m antes.
@@ -108,7 +114,9 @@ param(
     [switch]$Conferir,
     [switch]$Autonomo,
     [switch]$Ambos,
-    [switch]$Alcance
+    [switch]$Coded,
+    [switch]$Alcance,
+    [string]$Distancias = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -136,7 +144,7 @@ $pararCapturas = $null
 $medidasSonda = 'files/sonda-ble.txt'
 $arquivosSonda = New-Object System.Collections.Generic.List[string]
 $carimbo = Get-Date -Format 'yyyyMMdd-HHmmss'
-$automatico = $Conferir -or $Autonomo -or $Ambos -or $Alcance
+$automatico = $Conferir -or $Autonomo -or $Coded -or $Ambos -or $Alcance
 # Coleta: arquivos que vao para o zip no fim; logcat em fluxo por celular; transcricao.
 $coleta = New-Object System.Collections.Generic.List[string]
 $capturasLogcat = @{}
@@ -144,6 +152,8 @@ $apelidosBt = @{}
 $transcricao = $null
 $arqEnderecoPublico = Join-Path (Join-Path (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Kryptos') 'relay-publico') 'endereco.txt'
 $enderecoPublico = $null
+# Ajustes feitos nos celulares (Nao perturbe, tela acesa no cabo): desfeitos no finally.
+$restaurar = New-Object System.Collections.Generic.List[object]
 
 function Rodar([string]$Exe, [string[]]$Argumentos) {
     $antes = $ErrorActionPreference
@@ -156,6 +166,15 @@ function Rodar([string]$Exe, [string[]]$Argumentos) {
         throw "$([System.IO.Path]::GetFileName($Exe)) $($Argumentos -join ' ') saiu com codigo $codigo.`n$fim"
     }
     return $texto
+}
+
+# Espera o Bluetooth chegar ao estado (1 ligado, 0 desligado), lendo o que o celular diz.
+function EsperarBt([string]$s, [string]$quer) {
+    for ($k = 0; $k -lt 20; $k++) {
+        if ((Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'bluetooth_on')).Trim() -eq $quer) { return $true }
+        Start-Sleep -Milliseconds 500
+    }
+    return $false
 }
 
 function Passo([string]$Nome, [scriptblock]$Acao) {
@@ -338,7 +357,8 @@ try {
     if (($SondaBle -or $LerSonda) -and ($Relay -or $RelayPublico)) { throw 'a sonda BLE nao usa relay: -SondaBle e -LerSonda nao combinam com -Relay nem -RelayPublico' }
     if ($SondaBle -and $LerSonda) { throw 'use -SondaBle (teste inteiro) ou -LerSonda (so a leitura), nao os dois' }
     if ($automatico -and -not $SondaBle) { throw '-Conferir, -Autonomo, -Ambos e -Alcance sao modos da sonda: use junto com -SondaBle' }
-    if ($Conferir -and ($Autonomo -or $Ambos -or $Alcance)) { throw '-Conferir e a conferencia com um celular: nao combina com -Autonomo, -Ambos nem -Alcance' }
+    if ($Conferir -and ($Autonomo -or $Coded -or $Ambos -or $Alcance)) { throw '-Conferir e a conferencia com um celular: nao combina com -Autonomo, -Coded, -Ambos nem -Alcance' }
+    if ($Distancias -and -not $Alcance) { throw '-Distancias e dos pontos do -Alcance: use junto com -Alcance' }
     $flutter = Achar (Join-Path $Amb.flutter 'bin') @('flutter.bat', 'flutter')
     $adb = Achar (Join-Path $Amb.android_sdk 'platform-tools') @('adb.exe', 'adb')
     $app = Join-Path (Join-Path $Repo 'frontend') 'app'
@@ -540,15 +560,37 @@ try {
         if ($SondaBle) {
             Passo "$modeloAtual : Bluetooth" {
                 $bt = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'bluetooth_on')).Trim()
-                if ($bt -ne '1') { throw "o Bluetooth do $modeloAtual esta desligado (bluetooth_on=$bt): ligue e rode de novo" }
+                # Nos modos automaticos o passo seguinte desliga e liga o Bluetooth.
+                if ($bt -ne '1' -and -not $automatico) { throw "o Bluetooth do $modeloAtual esta desligado (bluetooth_on=$bt): ligue e rode de novo" }
                 $w = ''
                 try { $w = ((Rodar $adb @('-s', $s, 'shell', 'cmd', 'wifi', 'status')) -split "`n")[0].Trim() }
                 catch { $w = "nao lido ($($_.Exception.Message -split "`n" | Select-Object -First 1))" }
                 # O Wi-Fi divide os 2,4 GHz com o Bluetooth: so registra, para comparar rodadas.
                 $estadoWifi = if ($w -match 'disabled') { 'desligado' } elseif ($w -match 'enabled') { 'ligado' } else { $w }
-                "ligado; Wi-Fi $estadoWifi (mantenha igual em todas as rodadas); $(Bateria $s)"
+                "$(if ($bt -eq '1') { 'ligado' } else { 'desligado; o passo seguinte liga' }); Wi-Fi $estadoWifi (mantenha igual em todas as rodadas); $(Bateria $s)"
             }
             if ($automatico) {
+                Passo "$modeloAtual : preparado sem tocar (Bluetooth reiniciado, Nao perturbe, tela acesa no cabo)" {
+                    # Cada teste comeca com a pilha do Bluetooth no mesmo estado.
+                    Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'disable') | Out-Null
+                    if (-not (EsperarBt $s '0')) { throw "o Bluetooth do $modeloAtual nao desligou em 10 s (cmd bluetooth_manager disable)" }
+                    Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'enable') | Out-Null
+                    if (-not (EsperarBt $s '1')) { throw "o Bluetooth do $modeloAtual nao ligou de volta em 10 s (cmd bluetooth_manager enable): ligue na mao e rode de novo" }
+                    $zen = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'zen_mode')).Trim()
+                    $stay = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'stay_on_while_plugged_in')).Trim()
+                    if ($zen -notmatch '^[0-3]$') { $zen = '0' }
+                    if ($stay -notmatch '^\d+$') { $stay = '0' }
+                    # Guarda antes de mudar: o finally desfaz mesmo se a mudanca parar no meio.
+                    $script:restaurar.Add([pscustomobject]@{ Serial = $s; Modelo = $modeloAtual; Zen = $zen; Stay = $stay })
+                    Rodar $adb @('-s', $s, 'shell', 'cmd', 'notification', 'set_dnd', 'on') | Out-Null
+                    $zenAgora = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'zen_mode')).Trim()
+                    if ($zenAgora -eq '0') { throw "o Nao perturbe do $modeloAtual nao ligou (zen_mode continua 0)" }
+                    $novo = [string]([int]$stay -bor 2)
+                    Rodar $adb @('-s', $s, 'shell', 'settings', 'put', 'global', 'stay_on_while_plugged_in', $novo) | Out-Null
+                    $stayAgora = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'stay_on_while_plugged_in')).Trim()
+                    if ($stayAgora -ne $novo) { throw "a tela acesa no cabo do $modeloAtual nao pegou (stay_on_while_plugged_in=$stayAgora, queria $novo)" }
+                    "Bluetooth desligado e ligado de novo (conferido); Nao perturbe ligado (zen_mode $zenAgora, era $zen); tela acesa no cabo ($novo, era $stay); voltam ao que eram no fim"
+                }
                 # Sem tocar na tela: a permissao "dispositivos por perto" pelo adb, e
                 # conferida no app instalado (o que grava e provado lendo de volta).
                 Passo "$modeloAtual : Bluetooth permitido pelo adb (pm grant)" {
@@ -656,8 +698,9 @@ try {
         $etapas = @()
         if ($Conferir) { $etapas += , @('Conferir') }
         if ($Autonomo) { $etapas += , @('UmMetro') }
+        if ($Coded) { $etapas += , @('Coded') }
         if ($Ambos) { $etapas += , @('Ambos') }
-        if ($Alcance) { $etapas += , @(@('Alcance') + $(if ($Autonomo) { @('-SemCalibrar') } else { @() })) }
+        if ($Alcance) { $etapas += , @(@('Alcance') + $(if ($Autonomo) { @('-SemCalibrar') } else { @() }) + $(if ($Distancias) { @('-Distancias', $Distancias) } else { @() })) }
         foreach ($etapa in $etapas) {
             $resultados.Add("..    sonda-roteiro.ps1 -Modo $($etapa[0]):")
             Write-Host ".. sonda-roteiro.ps1 -Modo $($etapa[0]) (as linhas abaixo sao o andamento)"
@@ -677,9 +720,15 @@ try {
         }
         if ($roteiroOk -and $Alcance) {
             Write-Host ''
+            # Aviso sonoro: a hora de levar o celular (o resto foi sozinho ate aqui).
+            try { for ($k = 0; $k -lt 3; $k++) { [console]::Beep(880, 300); Start-Sleep -Milliseconds 150 } } catch { Write-Host '   (sem som de aviso neste terminal)' }
+            Write-Host '=================================================================='
+            Write-Host " AGORA E COM VOCE: o $($aparelhos[0].Modelo) fica perto do computador;"
+            Write-Host " o $($aparelhos[1].Modelo) vai ate a distancia que aparece na tela dele."
+            Write-Host '=================================================================='
             Write-Host 'Roteiro de alcance carregado. Agora:'
-            Write-Host '  1. Tire os dois cabos. Nos dois celulares, Nao perturbe ligado e a sonda aberta na frente.'
-            Write-Host '  2. Trena, linha reta, sem parede. Leve os celulares a distancia que o celular que procura mostra.'
+            Write-Host '  1. Tire os dois cabos. A sonda fica aberta na frente nos dois (Nao perturbe ja ligado).'
+            Write-Host '  2. Meca a distancia (trena ou passos). Anote se ha parede no caminho.'
             Write-Host '  3. Toque PROXIMO PONTO no celular que procura e nao mexa ate aparecer o proximo ponto.'
             Write-Host '  4. Quando aparecer roteiro-fim (ou nada mais achar), ligue os dois no cabo e digite FIM aqui.'
             try { $Host.UI.RawUI.FlushInputBuffer() } catch { Write-Host "   aviso: nao consegui limpar o buffer do teclado; so FIM encerra" }
@@ -836,6 +885,15 @@ try {
     foreach ($l in $logsRelay) { if (Test-Path -LiteralPath $l) { Remove-Item -LiteralPath $l -Force } }
     # O logcat em fluxo para aqui de qualquer jeito, e os brutos (com enderecos) saem.
     PararCapturasLogcat
+    # Desfaz o que foi mudado nos celulares (Nao perturbe e tela acesa no cabo).
+    foreach ($r in $restaurar) {
+        try {
+            $dnd = switch ($r.Zen) { '1' { 'priority' } '2' { 'none' } '3' { 'alarms' } default { 'off' } }
+            Rodar $adb @('-s', $r.Serial, 'shell', 'cmd', 'notification', 'set_dnd', $dnd) | Out-Null
+            Rodar $adb @('-s', $r.Serial, 'shell', 'settings', 'put', 'global', 'stay_on_while_plugged_in', $r.Stay) | Out-Null
+            Write-Host "$($r.Modelo): Nao perturbe e tela de volta ao que eram"
+        } catch { Write-Host "aviso: nao consegui desfazer os ajustes do $($r.Modelo) (cabo solto?): Nao perturbe e tela acesa no cabo ficam como o teste deixou" }
+    }
     ApagarBrutosLogcat
     Set-Location -LiteralPath $Repo
     Write-Host ''
