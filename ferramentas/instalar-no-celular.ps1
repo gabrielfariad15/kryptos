@@ -154,6 +154,7 @@ $arqEnderecoPublico = Join-Path (Join-Path (Join-Path ([Environment]::GetFolderP
 $enderecoPublico = $null
 # Ajustes feitos nos celulares (Nao perturbe, tela acesa no cabo): desfeitos no finally.
 $restaurar = New-Object System.Collections.Generic.List[object]
+$restaurarBt = New-Object System.Collections.Generic.List[object]
 
 function Rodar([string]$Exe, [string[]]$Argumentos) {
     $antes = $ErrorActionPreference
@@ -191,7 +192,11 @@ function EstadoBt([string]$s) {
 # (cmd bluetooth_manager wait-for-state, o que os testes do AOSP usam); depois confere
 # no dumpsys ate o prazo. Devolve o ultimo estado lido.
 function EsperarBt([string]$s, [string]$quer, [double]$segundos = 20) {
-    try { Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', "wait-for-state:STATE_$quer") | Out-Null } catch { }
+    # O codigo de saida nao decide nada (devolve -1 se o estado nao vem, ex. BLE_ON):
+    # quem decide e o dumpsys logo abaixo. Por isso nao passa pelo Rodar.
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $adb -s $s shell cmd bluetooth_manager "wait-for-state:STATE_$quer" 2>&1 | Out-Null } finally { $ErrorActionPreference = $antes }
     $limite = (Get-Date).AddSeconds([math]::Max(1, $segundos * $escalaBt))
     do {
         $e = EstadoBt $s
@@ -609,9 +614,24 @@ try {
                         # Quem prova que esta ligado e o inventario do app, no roteiro.
                         $btNota = 'Bluetooth NAO reiniciado (estado real ilegivel no dumpsys; o roteiro confere pelo app)'
                     } else {
+                        # Com "busca Bluetooth sempre ativa" (ble_scan_always_enabled=1), o disable
+                        # para em BLE_ON e nao em OFF: o LE fica de pe para a busca de outros apps
+                        # (teste de 10/11/2026, 04:50, no Edge). Os testes do AOSP desligam essa
+                        # busca antes e religam depois; aqui igual, e ela volta logo que o
+                        # Bluetooth liga (e de novo no fim, se o teste parar no meio).
+                        $ble = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'ble_scan_always_enabled')).Trim()
+                        $script:restaurarBt.Add([pscustomobject]@{ Serial = $s; Modelo = $modeloAtual; Ble = $ble })
+                        if ($ble -eq '1') {
+                            Rodar $adb @('-s', $s, 'shell', 'settings', 'put', 'global', 'ble_scan_always_enabled', '0') | Out-Null
+                            $bleAgora = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'ble_scan_always_enabled')).Trim()
+                            if ($bleAgora -ne '0') { throw "a busca Bluetooth sempre ativa do $modeloAtual nao desligou (ble_scan_always_enabled=$bleAgora)" }
+                        }
                         Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'disable') | Out-Null
                         $e = EsperarBt $s 'OFF' 20
-                        if ($e -ne 'OFF') { throw "o Bluetooth do $modeloAtual nao desligou em 20 s (cmd bluetooth_manager disable; estado real: $e)" }
+                        # BLE_ON: outro app ainda segura o LE. Para os apps o Bluetooth esta
+                        # desligado (isEnabled falso), mas o reinicio e so parcial: fica escrito.
+                        $parcial = ($e -eq 'BLE_ON')
+                        if ($e -ne 'OFF' -and -not $parcial) { throw "o Bluetooth do $modeloAtual nao desligou em 20 s (cmd bluetooth_manager disable; estado real: $e)" }
                         # O enable so depois do OFF real: mandado com o adaptador ainda
                         # desligando, ele pode se perder (hipotese para 10/11/2026, sem rastro).
                         Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'enable') | Out-Null
@@ -632,7 +652,14 @@ try {
                             if ($e -ne 'ON') { throw "o Bluetooth do $modeloAtual nao ligou: nem pelo adb (2 vezes) nem na mao em 2 min (estado real: $e)" }
                             $tentativas = 'na mao'
                         }
-                        $btNota = "Bluetooth desligado e ligado de novo (estado real no dumpsys: OFF e depois ON; enable: $tentativas$(if ($tentativas -is [int]) { ' vez(es)' }))"
+                        if ($ble -eq '1') {
+                            Rodar $adb @('-s', $s, 'shell', 'settings', 'put', 'global', 'ble_scan_always_enabled', '1') | Out-Null
+                            $bleAgora = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'ble_scan_always_enabled')).Trim()
+                            if ($bleAgora -ne '1') { throw "a busca Bluetooth sempre ativa do $modeloAtual nao voltou (ble_scan_always_enabled=$bleAgora)" }
+                        }
+                        $desligou = if ($parcial) { 'BLE_ON (reinicio parcial: outro app segurou o LE)' } else { 'OFF' }
+                        $buscaNota = if ($ble -eq '1') { '; busca sempre ativa desligada no reinicio e religada' } else { '' }
+                        $btNota = "Bluetooth desligado e ligado de novo (estado real no dumpsys: $desligou e depois ON; enable: $tentativas$(if ($tentativas -is [int]) { ' vez(es)' })$buscaNota)"
                     }
                     $zen = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'zen_mode')).Trim()
                     $stay = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'stay_on_while_plugged_in')).Trim()
@@ -709,6 +736,18 @@ try {
                 if ($perm -notmatch 'android\.permission\.BLUETOOTH_SCAN: granted=true') {
                     return 'SEM CONFERENCIA: o aviso de permissao do Android esta na tela (janela do sistema, fora do FLAG_SECURE). Toque Permitir no celular; a tela segura e conferida quando a permissao ja foi dada'
                 }
+            }
+            # A captura so diz algo do FLAG_SECURE se a janela da frente e o app. Em
+            # 10/11/2026, 04:39, a barra de notificacoes estava aberta (o Bluetooth sendo
+            # ligado na mao) e a captura pegou a barra: deu "FLAG_SECURE nao valeu" sem ser.
+            # Fecha a barra e confere quem esta na frente antes de capturar.
+            try { Rodar $adb @('-s', $s, 'shell', 'cmd', 'statusbar', 'collapse') | Out-Null } catch { Write-Host "   aviso: nao consegui fechar a barra de notificacoes do $modeloAtual" }
+            Start-Sleep -Milliseconds 800
+            $janelas = Rodar $adb @('-s', $s, 'shell', 'dumpsys', 'window')
+            $foco = [regex]::Match($janelas, 'mCurrentFocus=Window\{\S+ \S+ ([^}\s]+)\}')
+            if (-not $foco.Success) { return 'SEM CONFERENCIA: nao consegui ler qual janela esta na frente (dumpsys window)' }
+            if (-not $foco.Groups[1].Value.StartsWith("$Pacote/")) {
+                return "SEM CONFERENCIA: outra janela na frente do app ($($foco.Groups[1].Value)); a captura nao diria nada do FLAG_SECURE"
             }
             # System.Drawing so existe no Windows: fora dele (calibracao na maquina do
             # Claude, com adb falso) a captura fica sem conferencia, e o resultado diz.
@@ -943,6 +982,21 @@ try {
     foreach ($l in $logsRelay) { if (Test-Path -LiteralPath $l) { Remove-Item -LiteralPath $l -Force } }
     # O logcat em fluxo para aqui de qualquer jeito, e os brutos (com enderecos) saem.
     PararCapturasLogcat
+    # Bluetooth: se o teste parou no meio do reinicio, o celular nao fica sem Bluetooth.
+    foreach ($r in $restaurarBt) {
+        try {
+            if ($r.Ble -match '^[01]$') {
+                Rodar $adb @('-s', $r.Serial, 'shell', 'settings', 'put', 'global', 'ble_scan_always_enabled', $r.Ble) | Out-Null
+            }
+            $e = EstadoBt $r.Serial
+            if ($e -ne 'ON' -and $e -ne 'ilegivel') {
+                Rodar $adb @('-s', $r.Serial, 'shell', 'cmd', 'bluetooth_manager', 'enable') | Out-Null
+                $e = EsperarBt $r.Serial 'ON' 20
+            }
+            if ($e -eq 'ON') { Write-Host "$($r.Modelo): Bluetooth ligado (estado real conferido)" }
+            else { Write-Host "AVISO $($r.Modelo): o Bluetooth NAO voltou a ligar (estado real: $e): ligue na mao" }
+        } catch { Write-Host "aviso: nao consegui conferir o Bluetooth do $($r.Modelo) no fim (cabo solto?): confira se ficou ligado" }
+    }
     # Desfaz o que foi mudado nos celulares (Nao perturbe e tela acesa no cabo).
     foreach ($r in $restaurar) {
         try {

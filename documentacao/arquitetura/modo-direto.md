@@ -73,6 +73,11 @@ Decidido em 08/11/2026. Exigência de origem: `DECISOES-FASE-0.md` (seção 8) e
     - **O enable só sai depois do OFF real.** Se não ligar em 20 s, o instalador manda de novo e espera 30 s. Se ainda assim não ligar, dá três bipes e pede para ligar na mão, esperando até 2 min. Por que o enable se perdeu é hipótese minha, sem rastro: ele pode ter sido mandado com o adaptador ainda desligando.
     - **Estado real ilegível no dumpsys:** o instalador não reinicia o Bluetooth, porque não teria como provar que voltou.
     - **O roteiro confere pelo app antes de medir.** Se o inventário disser `bluetooth_ligado=nao`, ele para com o motivo, em vez de três etapas de `BLUETOOTH_DESLIGADO`.
+18. **BLE_ON e captura com a barra aberta (10/11/2026, 04:39 e 04:50):**
+    - **No Edge, o disable parou em `BLE_ON`, não em `OFF`.** É o estado em que o LE continua de pé para a "busca Bluetooth sempre ativa" (`ble_scan_always_enabled=1`). O Bluetooth fica desligado para os apps, mas não para o rádio. Os testes do AOSP desligam essa busca antes do reinício e religam depois. Aqui é igual: ela volta assim que o Bluetooth liga, e de novo no fim se o teste parar no meio. Se mesmo assim ficar em `BLE_ON` (outro app segurando o LE), o reinício segue e o resultado diz "reinício parcial". As falhas das 04:13 e 04:15 podem ter sido esse mesmo estado, com o enable mandado no meio da transição. É hipótese minha, sem rastro.
+    - **No fim, o instalador confere se o Bluetooth está ligado** pelo estado real e religa se for preciso. Às 04:50 o teste parou no meio do reinício e deixou o Bluetooth do Edge desligado.
+    - **O `wait-for-state` não passa mais pelo `Rodar`.** A falha dele é esperada, e a decisão sai do dumpsys. Pelo `Rodar`, ela aparecia como `TerminatingError` na transcrição, com cara de erro engolido.
+    - **A captura só conclui algo do FLAG_SECURE com o app na frente.** Às 04:39, a barra de notificações estava aberta (o Bluetooth sendo ligado na mão), e o resultado deu "FLAG_SECURE não valeu" sem ser. Agora o instalador fecha a barra (`cmd statusbar collapse`) e confere a janela em foco (`mCurrentFocus`). Com outra janela na frente, o resultado diz "SEM CONFERENCIA" e mostra qual era a janela.
 
 ## O que a pesquisa mostrou (08/11/2026)
 
