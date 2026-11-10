@@ -168,14 +168,41 @@ function Rodar([string]$Exe, [string[]]$Argumentos) {
     return $texto
 }
 
-# Espera o Bluetooth chegar ao estado (1 ligado, 0 desligado), lendo o que o celular diz.
-function EsperarBt([string]$s, [string]$quer) {
-    for ($k = 0; $k -lt 20; $k++) {
-        if ((Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'bluetooth_on')).Trim() -eq $quer) { return $true }
-        Start-Sleep -Milliseconds 500
+# Estado REAL do adaptador Bluetooth: ON, OFF, um intermediario (TURNING_ON, BLE_ON...)
+# ou 'ilegivel'. O 'settings get global bluetooth_on' NAO serve: e o que o sistema
+# guarda como desejado, e em 10/11/2026 ficou 1 com o adaptador desligado (o app viu
+# bluetooth_ligado=nao). O texto do dumpsys tem o endereco Bluetooth do aparelho: so a
+# linha do estado e lida, nada dele sai desta funcao (nem em mensagem de erro).
+function EstadoBt([string]$s) {
+    $antes = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $t = (@(& $adb -s $s shell dumpsys bluetooth_manager 2>&1) | ForEach-Object { "$_" }) -join "`n" }
+    finally { $ErrorActionPreference = $antes }
+    $m = [regex]::Match($t, '(?m)^\s*state:\s*([A-Z_]+|\d+)\s*$')
+    if (-not $m.Success) { return 'ilegivel' }
+    switch ($m.Groups[1].Value) {
+        { $_ -in @('ON', 'STATE_ON', '12') } { return 'ON' }
+        { $_ -in @('OFF', 'STATE_OFF', '10') } { return 'OFF' }
+        default { return $m.Groups[1].Value }
     }
-    return $false
 }
+
+# Espera o adaptador chegar a ON ou OFF. Primeiro o proprio Android espera
+# (cmd bluetooth_manager wait-for-state, o que os testes do AOSP usam); depois confere
+# no dumpsys ate o prazo. Devolve o ultimo estado lido.
+function EsperarBt([string]$s, [string]$quer, [double]$segundos = 20) {
+    try { Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', "wait-for-state:STATE_$quer") | Out-Null } catch { }
+    $limite = (Get-Date).AddSeconds([math]::Max(1, $segundos * $escalaBt))
+    do {
+        $e = EstadoBt $s
+        if ($e -eq $quer) { return $e }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $limite)
+    return $e
+}
+
+$escalaBt = 1.0
+if ($env:KRYPTOS_SONDA_ESCALA) { $escalaBt = [double]::Parse($env:KRYPTOS_SONDA_ESCALA, [Globalization.CultureInfo]::InvariantCulture) }
 
 function Passo([string]$Nome, [scriptblock]$Acao) {
     Write-Host ".. $Nome"
@@ -559,9 +586,11 @@ try {
 
         if ($SondaBle) {
             Passo "$modeloAtual : Bluetooth" {
-                $bt = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'bluetooth_on')).Trim()
+                $real = EstadoBt $s
+                # Ilegivel: cai no settings (o desejado), e o inventario do app confere depois.
+                $bt = if ($real -eq 'ON') { '1' } elseif ($real -eq 'ilegivel') { (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'bluetooth_on')).Trim() } else { '0' }
                 # Nos modos automaticos o passo seguinte desliga e liga o Bluetooth.
-                if ($bt -ne '1' -and -not $automatico) { throw "o Bluetooth do $modeloAtual esta desligado (bluetooth_on=$bt): ligue e rode de novo" }
+                if ($bt -ne '1' -and -not $automatico) { throw "o Bluetooth do $modeloAtual esta desligado (estado real: $real): ligue e rode de novo" }
                 $w = ''
                 try { $w = ((Rodar $adb @('-s', $s, 'shell', 'cmd', 'wifi', 'status')) -split "`n")[0].Trim() }
                 catch { $w = "nao lido ($($_.Exception.Message -split "`n" | Select-Object -First 1))" }
@@ -571,11 +600,40 @@ try {
             }
             if ($automatico) {
                 Passo "$modeloAtual : preparado sem tocar (Bluetooth reiniciado, Nao perturbe, tela acesa no cabo)" {
-                    # Cada teste comeca com a pilha do Bluetooth no mesmo estado.
-                    Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'disable') | Out-Null
-                    if (-not (EsperarBt $s '0')) { throw "o Bluetooth do $modeloAtual nao desligou em 10 s (cmd bluetooth_manager disable)" }
-                    Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'enable') | Out-Null
-                    if (-not (EsperarBt $s '1')) { throw "o Bluetooth do $modeloAtual nao ligou de volta em 10 s (cmd bluetooth_manager enable): ligue na mao e rode de novo" }
+                    # Cada teste comeca com a pilha do Bluetooth no mesmo estado. Conferido no
+                    # estado real do adaptador (dumpsys), nunca no settings bluetooth_on.
+                    $btNota = ''
+                    $e0 = EstadoBt $s
+                    if ($e0 -eq 'ilegivel') {
+                        # Sem ler o estado real nao da para provar o reinicio: nao reinicia.
+                        # Quem prova que esta ligado e o inventario do app, no roteiro.
+                        $btNota = 'Bluetooth NAO reiniciado (estado real ilegivel no dumpsys; o roteiro confere pelo app)'
+                    } else {
+                        Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'disable') | Out-Null
+                        $e = EsperarBt $s 'OFF' 20
+                        if ($e -ne 'OFF') { throw "o Bluetooth do $modeloAtual nao desligou em 20 s (cmd bluetooth_manager disable; estado real: $e)" }
+                        # O enable so depois do OFF real: mandado com o adaptador ainda
+                        # desligando, ele pode se perder (hipotese para 10/11/2026, sem rastro).
+                        Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'enable') | Out-Null
+                        $e = EsperarBt $s 'ON' 20
+                        $tentativas = 1
+                        if ($e -ne 'ON') {
+                            Rodar $adb @('-s', $s, 'shell', 'cmd', 'bluetooth_manager', 'enable') | Out-Null
+                            $e = EsperarBt $s 'ON' 30
+                            $tentativas = 2
+                        }
+                        if ($e -ne 'ON') {
+                            try { for ($k = 0; $k -lt 3; $k++) { [console]::Beep(660, 300); Start-Sleep -Milliseconds 150 } } catch { Write-Host '   (sem som de aviso neste terminal)' }
+                            Write-Host '=================================================================='
+                            Write-Host " LIGUE O BLUETOOTH NO $($modeloAtual.ToUpper()) (barra de cima, toque no Bluetooth)."
+                            Write-Host " O comando do adb nao ligou (estado real: $e). Espero ate 2 minutos."
+                            Write-Host '=================================================================='
+                            $e = EsperarBt $s 'ON' 120
+                            if ($e -ne 'ON') { throw "o Bluetooth do $modeloAtual nao ligou: nem pelo adb (2 vezes) nem na mao em 2 min (estado real: $e)" }
+                            $tentativas = 'na mao'
+                        }
+                        $btNota = "Bluetooth desligado e ligado de novo (estado real no dumpsys: OFF e depois ON; enable: $tentativas$(if ($tentativas -is [int]) { ' vez(es)' }))"
+                    }
                     $zen = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'zen_mode')).Trim()
                     $stay = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'stay_on_while_plugged_in')).Trim()
                     if ($zen -notmatch '^[0-3]$') { $zen = '0' }
@@ -589,7 +647,7 @@ try {
                     Rodar $adb @('-s', $s, 'shell', 'settings', 'put', 'global', 'stay_on_while_plugged_in', $novo) | Out-Null
                     $stayAgora = (Rodar $adb @('-s', $s, 'shell', 'settings', 'get', 'global', 'stay_on_while_plugged_in')).Trim()
                     if ($stayAgora -ne $novo) { throw "a tela acesa no cabo do $modeloAtual nao pegou (stay_on_while_plugged_in=$stayAgora, queria $novo)" }
-                    "Bluetooth desligado e ligado de novo (conferido); Nao perturbe ligado (zen_mode $zenAgora, era $zen); tela acesa no cabo ($novo, era $stay); voltam ao que eram no fim"
+                    "$btNota; Nao perturbe ligado (zen_mode $zenAgora, era $zen); tela acesa no cabo ($novo, era $stay); voltam ao que eram no fim"
                 }
                 # Sem tocar na tela: a permissao "dispositivos por perto" pelo adb, e
                 # conferida no app instalado (o que grava e provado lendo de volta).

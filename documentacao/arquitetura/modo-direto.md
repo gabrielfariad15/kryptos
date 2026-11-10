@@ -68,6 +68,11 @@ Decidido em 08/11/2026. Exigência de origem: `DECISOES-FASE-0.md` (seção 8) e
     - **`APP_SAIU_DA_FRENTE` 1 vez é esperado** (o ciclo de vida aperta o botão de início). Mais de uma vez continua AVISO.
     - **Celulares preparados sem tocar:** antes da sonda, o instalador desliga e liga o Bluetooth de cada celular (`cmd bluetooth_manager`), liga o Não perturbe e deixa a tela acesa no cabo, tudo conferido lendo de volta; no fim, Não perturbe e tela voltam ao que eram, mesmo se o teste falhar. O Wi-Fi não é mexido (só registrado): mudar duas coisas juntas não diria qual delas mexeu no resultado.
     - **Aviso na hora de levar o celular:** três bipes e o nome do celular que fica e do que vai. `-Distancias` escolhe os pontos (ex.: `1,7,13` dentro de casa, com parede no caminho).
+17. **Bluetooth conferido no estado real (10/11/2026, de madrugada):** nas duas rodadas de `-Todos -SondaBle -Coded -Ambos -Alcance -Distancias '1,7,13'`, o reinício pelo adb deixou o adaptador desligado. Na primeira foram os dois celulares; na segunda, só o g15. O instalador disse "conferido" porque lia `settings get global bluetooth_on`, que é o estado desejado e ficou 1. O app viu `bluetooth_ligado=nao` do início ao fim, e todo comando deu `BLUETOOTH_DESLIGADO`. Erro meu: a regra de provar lendo de volta foi cumprida na fonte errada.
+    - **Agora a conferência lê o estado real:** `cmd bluetooth_manager wait-for-state:STATE_OFF|STATE_ON`, o mesmo que os testes do AOSP usam, e depois a linha `state:` do `dumpsys bluetooth_manager`. Desse texto só a linha do estado é lida, porque ele traz o endereço do aparelho, e nada dele vai para o log nem para mensagem de erro.
+    - **O enable só sai depois do OFF real.** Se não ligar em 20 s, o instalador manda de novo e espera 30 s. Se ainda assim não ligar, dá três bipes e pede para ligar na mão, esperando até 2 min. Por que o enable se perdeu é hipótese minha, sem rastro: ele pode ter sido mandado com o adaptador ainda desligando.
+    - **Estado real ilegível no dumpsys:** o instalador não reinicia o Bluetooth, porque não teria como provar que voltou.
+    - **O roteiro confere pelo app antes de medir.** Se o inventário disser `bluetooth_ligado=nao`, ele para com o motivo, em vez de três etapas de `BLUETOOTH_DESLIGADO`.
 
 ## O que a pesquisa mostrou (08/11/2026)
 

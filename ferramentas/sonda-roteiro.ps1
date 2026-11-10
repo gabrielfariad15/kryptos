@@ -291,6 +291,13 @@ try {
         EsperarApp $s
         $forma = PrepararCaminho $s
         $resultados.Add("OK    $(Nome $s): o comando chega a sonda por $forma")
+        # O app e quem diz se o adaptador esta ligado (BluetoothAdapter.isEnabled, no
+        # inventario que PrepararCaminho acabou de pedir). Desligado, nada adiante mede:
+        # para aqui, com o motivo, em vez de cada rodada dar BLUETOOTH_DESLIGADO.
+        $inv = @(Medidas $s | Where-Object { $_ -match 'sonda-ble aparelho ' }) | Select-Object -Last 1
+        if ($inv -match 'bluetooth_ligado=nao') { throw "o app do $(Nome $s) ve o Bluetooth DESLIGADO (inventario: bluetooth_ligado=nao): ligue o Bluetooth no celular e rode de novo" }
+        if ($inv -notmatch 'bluetooth_ligado=sim') { throw "nao consegui conferir pelo app se o Bluetooth do $(Nome $s) esta ligado (sem bluetooth_ligado no inventario)" }
+        $resultados.Add("OK    $(Nome $s): o app ve o Bluetooth ligado (inventario)")
     }
 
     if ($Modo -eq 'Conferir') {
