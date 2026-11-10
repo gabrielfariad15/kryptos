@@ -135,8 +135,10 @@ try {
 
     # ---------- idas e voltas (fora da calibracao) ----------
     $transf = @($medidas | Where-Object { ($_.Evento -eq 'ida' -or $_.Evento -eq 'volta') -and $_.C['calibrar'] -ne 'sim' })
-    foreach ($g in @($transf | Group-Object { "$($_.Evento) $($_.C['distancia']) $($_.C['phy']) $($_.C['prioridade']) $(Volta $_) $($_.Aparelho)" } |
-            Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] }, { $_.Group[0].C['prioridade'] }, { Volta $_.Group[0] }, { $_.Group[0].Aparelho }, { $_.Group[0].Evento })) {
+    # bytes: a carta inteira (66594) e o padrao; menor e o envio do tamanho de mensagem
+    # (etapa Mensagem, 10/11/2026), em grupo proprio e com o tamanho escrito na linha.
+    foreach ($g in @($transf | Group-Object { "$($_.Evento) $($_.C['distancia']) $($_.C['phy']) $($_.C['prioridade']) $($_.C['bytes']) $(Volta $_) $($_.Aparelho)" } |
+            Sort-Object { [int](Num $_.Group[0].C['distancia']) }, { $_.Group[0].C['phy'] }, { $_.Group[0].C['prioridade'] }, { [int](Num $_.Group[0].C['bytes']) }, { Volta $_.Group[0] }, { $_.Group[0].Aparelho }, { $_.Group[0].Evento })) {
         $r = $g.Group[0]
         $conf = @($g.Group | Where-Object { $_.C['resultado'] -eq 'CONFERIU' }).Count
         $msv = Valores $g.Group 'ms'
@@ -144,7 +146,8 @@ try {
         $max = ($msv | Measure-Object -Maximum).Maximum
         $rssi = if ($r.Evento -eq 'ida') { "; rssi mediana $(F (Mediana (Valores $g.Group 'rssi'))) dBm" } else { '' }
         $marca = if ($conf -eq $g.Count) { 'OK   ' } else { 'AVISO' }
-        $resultados.Add("$marca $("{0,-5}" -f $r.Evento) a $($r.C['distancia']) m, $($r.C['phy']) $($r.C['prioridade']), volta $(Volta $r), procura $($r.Aparelho): $conf de $($g.Count) conferidas; ms mediana $(F (Mediana $msv)) (min $(F $min), max $(F $max)); kbit/s mediana $(F (Mediana (Valores $g.Group 'kbps')))$rssi")
+        $tamanho = if ($r.C['bytes'] -and $r.C['bytes'] -ne '66594') { ", $($r.C['bytes']) bytes" } else { '' }
+        $resultados.Add("$marca $("{0,-5}" -f $r.Evento) a $($r.C['distancia']) m, $($r.C['phy']) $($r.C['prioridade'])$tamanho, volta $(Volta $r), procura $($r.Aparelho): $conf de $($g.Count) conferidas; ms mediana $(F (Mediana $msv)) (min $(F $min), max $(F $max)); kbit/s mediana $(F (Mediana (Valores $g.Group 'kbps')))$rssi")
     }
     if ($transf.Count -eq 0) { $resultados.Add('AVISO nenhuma ida ou volta fora da calibracao') }
 

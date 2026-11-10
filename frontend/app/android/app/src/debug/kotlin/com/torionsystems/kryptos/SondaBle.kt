@@ -232,7 +232,11 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
 
     private fun configValida(cfg: Config) =
         cfg.phy in setOf("1M", "2M", "CODED", "CODED1M") && cfg.prioridade in setOf("PADRAO", "ALTA") &&
-            cfg.repeticoes in 1..50 && cfg.distancia >= 0 && cfg.volta in CAMINHOS
+            cfg.repeticoes in 1..50 && cfg.distancia >= 0 && cfg.volta in CAMINHOS &&
+            cfg.bytes in 1..TAMANHO_CARTA &&
+            // A calibração sabota o 1º e o 2º envio (um byte trocado, um pedaço pulado) e
+            // precisa de vários pedaços: só com a carta inteira.
+            (!cfg.calibrar || cfg.bytes == TAMANHO_CARTA)
 
     // ---------- comandos do script ----------
 
@@ -335,6 +339,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             volta = c["volta"] ?: "NOTIFICACAO",
             esperaAmbosMs = c["espera_ms"]?.toIntOrNull() ?: ESPERA_AMBOS_MAX_MS,
             atrasoOlaMs = c["atraso_ola_ms"]?.toIntOrNull() ?: 0,
+            bytes = c["bytes"]?.toIntOrNull() ?: TAMANHO_CARTA,
         )
         if (cfg.esperaAmbosMs !in 0..5_000 || cfg.atrasoOlaMs !in 0..5_000) return null
         // A calibração depende de 3 rodadas: sabotagem na 1ª e na 2ª, nada na 3ª.
@@ -629,6 +634,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     private var voltaServidorN = 0
     private var voltaServidorComeco = 0L
     private var voltaServidorPedacos = 0
+    // Tamanho da ultima ida recebida: a volta sai do mesmo tamanho (sem campo novo no quadro).
+    private var tamanhoVoltaServidor = TAMANHO_CARTA
+    private var voltaServidorBytes = TAMANHO_CARTA
     private var voltaServidorCaminho = QuadroSonda.CAMINHO_NOTIFICACAO
     private var voltaServidorAtiva = false
     private val tempoVoltaServidor = Runnable {
@@ -897,6 +905,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 val ini = QuadroSonda.lerInicio(q)
                 if (ini == null) { falha("QUADRO_INVALIDO", "papel=servidor tipo=inicio"); return }
                 remontagemServidor = QuadroSonda.Remontagem(ini) { SystemClock.elapsedRealtime() }
+                tamanhoVoltaServidor = ini.total.coerceIn(1, TAMANHO_CARTA)
             }
             QuadroSonda.TIPO_PEDACO -> {
                 val rem = remontagemServidor ?: return
@@ -927,7 +936,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                     else -> true
                 }
                 if (!pronto) { falha("VOLTA_NAO_PREPARADA", "papel=servidor caminho=$nomeCaminho n=${p.n}"); return }
-                val dados = ByteArray(TAMANHO_CARTA).also { sorteio.nextBytes(it) }
+                val dados = ByteArray(tamanhoVoltaServidor).also { sorteio.nextBytes(it) }
                 // L2CAP não tem o teto de 512 do atributo, mas usa o mesmo quadro para a
                 // comparação ser só do caminho. O que vai no ar são pacotes de até 251 bytes
                 // em qualquer caso (extensão de tamanho de dados do BLE).
@@ -940,7 +949,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 val quadros = listOf(QuadroSonda.inicio(p.n, dados, tam)) + QuadroSonda.pedacos(dados, tam, p.sabotagem)
                 voltaServidorN = p.n
                 voltaServidorCaminho = p.caminho
-                voltaServidorPedacos = QuadroSonda.quantosPedacos(TAMANHO_CARTA, tam)
+                voltaServidorPedacos = QuadroSonda.quantosPedacos(dados.size, tam)
+                voltaServidorBytes = dados.size
                 voltaServidorComeco = SystemClock.elapsedRealtime()
                 armarVoltaServidor()
                 when (p.caminho) {
@@ -961,8 +971,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 }
                 medida(
                     "servidor-enviou",
-                    "n=${r.n} caminho=${QuadroSonda.nomeDoCaminho(voltaServidorCaminho)} bytes=$TAMANHO_CARTA pedacos=$voltaServidorPedacos " +
-                        "ms=$ms kbps=${kbps(TAMANHO_CARTA, ms)} resultado=${QuadroSonda.nomeDoCodigo(r.codigo)} " +
+                    "n=${r.n} caminho=${QuadroSonda.nomeDoCaminho(voltaServidorCaminho)} bytes=$voltaServidorBytes pedacos=$voltaServidorPedacos " +
+                        "ms=$ms kbps=${kbps(voltaServidorBytes, ms)} resultado=${QuadroSonda.nomeDoCodigo(r.codigo)} " +
                         "ocupado=$ocupadoVolta mtu=$mtuVolta",
                 )
             }
@@ -1237,6 +1247,9 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
         // Só para testar o desempate: o servidor segura o OLA recebido por este tempo, e os
         // dois clientes chegam a mandar o OLA antes de qualquer decisão (comparação de nonce).
         val atrasoOlaMs: Int = 0,
+        // Tamanho de cada envio. A carta inteira (66.594) e o padrao; menor mede a mensagem
+        // de texto de verdade (10/11/2026). O servidor devolve do mesmo tamanho que recebeu.
+        val bytes: Int = TAMANHO_CARTA,
     ) {
         val caminho: Int get() = QuadroSonda.caminhoDoNome(volta) ?: QuadroSonda.CAMINHO_NOTIFICACAO
     }
@@ -1500,7 +1513,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
                 medida(
                     "conexao",
                     "${campos(cfg)} ms=$msConectar mtu=$mtuCliente pedaco=$pedaco " +
-                        "pedacos=${QuadroSonda.quantosPedacos(TAMANHO_CARTA, pedaco)} phy_tx=${nomePhy(ev.tx)} phy_rx=${nomePhy(ev.rx)}",
+                        "pedacos=${QuadroSonda.quantosPedacos(cfg.bytes, pedaco)} phy_tx=${nomePhy(ev.tx)} phy_rx=${nomePhy(ev.rx)}",
                 )
                 ligarNotificacao(g, cfg, saida)
             }
@@ -1702,7 +1715,7 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
     // ---------- ida: o cliente escreve sem resposta, o servidor confere ----------
 
     private fun ida(g: BluetoothGatt, cfg: Config, n: Int) {
-        val dados = ByteArray(TAMANHO_CARTA).also { sorteio.nextBytes(it) }
+        val dados = ByteArray(cfg.bytes).also { sorteio.nextBytes(it) }
         val tam = QuadroSonda.tamanhoDoPedaco(mtuCliente)
         val quadros = listOf(QuadroSonda.inicio(n, dados, tam)) + QuadroSonda.pedacos(dados, tam, sabotagem(cfg, n))
         val comeco = SystemClock.elapsedRealtime()
@@ -1721,8 +1734,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             lerRssi(g) { rssi ->
                 medida(
                     "ida",
-                    "${campos(cfg)} n=$n bytes=$TAMANHO_CARTA pedacos=${QuadroSonda.quantosPedacos(TAMANHO_CARTA, tam)} " +
-                        "ms=$msResultado kbps=${kbps(TAMANHO_CARTA, msResultado)} resultado=$nome recebidos=${r.recebidos} " +
+                    "${campos(cfg)} n=$n bytes=${dados.size} pedacos=${QuadroSonda.quantosPedacos(dados.size, tam)} " +
+                        "ms=$msResultado kbps=${kbps(dados.size, msResultado)} resultado=$nome recebidos=${r.recebidos} " +
                         "ms_receptor=${r.msReceptor} ocupado=${ocupadoIda[0]} rssi=$rssi",
                 )
                 volta(g, cfg, n)
@@ -1810,8 +1823,8 @@ class SondaBle(private val activity: Activity, private val canal: MethodChannel)
             if (r.codigo == QuadroSonda.CONFERIU) voltasOk++
             medida(
                 "volta",
-                "${campos(cfg)} n=$n bytes=$TAMANHO_CARTA pedacos=${atual.inicio.pedacos} ms=$msResultado " +
-                    "kbps=${kbps(TAMANHO_CARTA, msResultado)} resultado=$nome recebidos=${r.recebidos} " +
+                "${campos(cfg)} n=$n bytes=${atual.inicio.total} pedacos=${atual.inicio.pedacos} ms=$msResultado " +
+                    "kbps=${kbps(atual.inicio.total, msResultado)} resultado=$nome recebidos=${r.recebidos} " +
                     "repetidos=${atual.repetidos} ms_receptor=${r.msReceptor}",
             )
             // Devolve o resultado para o servidor medir o lado dele.

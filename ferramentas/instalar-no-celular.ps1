@@ -62,6 +62,8 @@
 #     espera 0 (colisao provocada), para conferir o desempate pelo OLA.
 #   -Autonomo -Ambos juntos: tudo de uma vez, um zip e um resumo.
 #   -Coded: os dois no cabo, a 1 m: Coded nos dois sentidos, conectando em Coded e em 1M.
+#   -Mensagem: os dois no cabo, a 1 m: envios do tamanho de mensagem de texto (256, 1024
+#     e 4096 bytes) nos dois sentidos, em 1M e em Coded.
 #   Nos modos automaticos, antes da sonda e sem tocar na tela: o Bluetooth de cada celular
 #   e desligado e ligado de novo (conferido), o Nao perturbe liga e a tela fica acesa no
 #   cabo. No fim, Nao perturbe e tela voltam ao que eram, mesmo se o teste falhar.
@@ -115,6 +117,7 @@ param(
     [switch]$Autonomo,
     [switch]$Ambos,
     [switch]$Coded,
+    [switch]$Mensagem,
     [switch]$Alcance,
     [string]$Distancias = ''
 )
@@ -144,7 +147,7 @@ $pararCapturas = $null
 $medidasSonda = 'files/sonda-ble.txt'
 $arquivosSonda = New-Object System.Collections.Generic.List[string]
 $carimbo = Get-Date -Format 'yyyyMMdd-HHmmss'
-$automatico = $Conferir -or $Autonomo -or $Coded -or $Ambos -or $Alcance
+$automatico = $Conferir -or $Autonomo -or $Coded -or $Mensagem -or $Ambos -or $Alcance
 # Coleta: arquivos que vao para o zip no fim; logcat em fluxo por celular; transcricao.
 $coleta = New-Object System.Collections.Generic.List[string]
 $capturasLogcat = @{}
@@ -389,7 +392,7 @@ try {
     if (($SondaBle -or $LerSonda) -and ($Relay -or $RelayPublico)) { throw 'a sonda BLE nao usa relay: -SondaBle e -LerSonda nao combinam com -Relay nem -RelayPublico' }
     if ($SondaBle -and $LerSonda) { throw 'use -SondaBle (teste inteiro) ou -LerSonda (so a leitura), nao os dois' }
     if ($automatico -and -not $SondaBle) { throw '-Conferir, -Autonomo, -Ambos e -Alcance sao modos da sonda: use junto com -SondaBle' }
-    if ($Conferir -and ($Autonomo -or $Coded -or $Ambos -or $Alcance)) { throw '-Conferir e a conferencia com um celular: nao combina com -Autonomo, -Coded, -Ambos nem -Alcance' }
+    if ($Conferir -and ($Autonomo -or $Coded -or $Mensagem -or $Ambos -or $Alcance)) { throw '-Conferir e a conferencia com um celular: nao combina com -Autonomo, -Coded, -Mensagem, -Ambos nem -Alcance' }
     if ($Distancias -and -not $Alcance) { throw '-Distancias e dos pontos do -Alcance: use junto com -Alcance' }
     $flutter = Achar (Join-Path $Amb.flutter 'bin') @('flutter.bat', 'flutter')
     $adb = Achar (Join-Path $Amb.android_sdk 'platform-tools') @('adb.exe', 'adb')
@@ -796,6 +799,7 @@ try {
         if ($Conferir) { $etapas += , @('Conferir') }
         if ($Autonomo) { $etapas += , @('UmMetro') }
         if ($Coded) { $etapas += , @('Coded') }
+        if ($Mensagem) { $etapas += , @('Mensagem') }
         if ($Ambos) { $etapas += , @('Ambos') }
         if ($Alcance) { $etapas += , @(@('Alcance') + $(if ($Autonomo) { @('-SemCalibrar') } else { @() }) + $(if ($Distancias) { @('-Distancias', $Distancias) } else { @() })) }
         foreach ($etapa in $etapas) {

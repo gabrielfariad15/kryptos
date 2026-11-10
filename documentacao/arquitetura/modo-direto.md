@@ -79,6 +79,8 @@ Decidido em 08/11/2026. Exigência de origem: `DECISOES-FASE-0.md` (seção 8) e
     - **O `wait-for-state` não passa mais pelo `Rodar`.** A falha dele é esperada, e a decisão sai do dumpsys. Pelo `Rodar`, ela aparecia como `TerminatingError` na transcrição, com cara de erro engolido.
     - **A captura só conclui algo do FLAG_SECURE com o app na frente.** Às 04:39, a barra de notificações estava aberta (o Bluetooth sendo ligado na mão), e o resultado deu "FLAG_SECURE não valeu" sem ser. Agora o instalador fecha a barra (`cmd statusbar collapse`) e confere a janela em foco (`mCurrentFocus`). Com outra janela na frente, o resultado diz "SEM CONFERENCIA" e mostra qual era a janela.
 
+19. **Etapa `-Mensagem` (10/11/2026):** até aqui a sonda só mandava a carta inteira (66.594 bytes), e o tempo de uma mensagem de texto era conta minha. Agora o comando aceita `bytes=` (de 1 até a carta), e o servidor devolve a volta do mesmo tamanho que recebeu na ida, sem mudar o quadro: o tamanho já vai no INICIO. A calibração continua só com a carta inteira, porque a sabotagem pula um pedaço e precisa de vários. A etapa mede 256, 1024 e 4096 bytes, com 5 idas e voltas cada, nos dois sentidos, em 1M PADRÃO e em CODED ALTA, a 1 m. A análise separa por tamanho.
+
 ## O que a pesquisa mostrou (08/11/2026)
 
 - **bitchat** (malha BLE, Android e iPhone): cada aparelho age nos dois papéis, e a mensagem grande vai em pedaços. A Trail of Bits considerou legítimas as falhas apontadas logo no lançamento (julho de 2025), e uma auditoria posterior achou injeção de mensagem não autenticada na malha (corrigida em 28/01/2026). Lição para o Kryptos: o transporte não autentica nada; quem decide se a carta vale é o núcleo, pelo Olm.

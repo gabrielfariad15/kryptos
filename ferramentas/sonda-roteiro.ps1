@@ -25,6 +25,10 @@
 #   Coded     dois celulares a 1 m: uma calibracao e, nos dois sentidos, 3 rodadas em
 #             CODED (conecta em Coded) e 3 em CODED1M (conecta em 1M e troca para Coded),
 #             1 ida e volta cada (10/11/2026: o Edge procurando nao abria conexao em Coded).
+#   Mensagem  dois celulares a 1 m: uma calibracao e, nos dois sentidos, envios do tamanho
+#             de mensagem de texto (256, 1024 e 4096 bytes; a volta sai do mesmo tamanho),
+#             5 idas e voltas cada, em 1M PADRAO e em CODED ALTA (10/11/2026: a sonda so
+#             media a carta de 66.594 bytes, e o tempo de texto era estimativa).
 #   Alcance   dois celulares: o primeiro anuncia, o segundo calibra (sem -SemCalibrar) e
 #             recebe o roteiro de distancias; depois a pessoa tira os cabos e toca PROXIMO
 #             PONTO em cada distancia.
@@ -38,7 +42,7 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('Conferir', 'UmMetro', 'Coded', 'Ambos', 'Alcance')][string]$Modo,
+    [Parameter(Mandatory = $true)][ValidateSet('Conferir', 'UmMetro', 'Coded', 'Mensagem', 'Ambos', 'Alcance')][string]$Modo,
     [Parameter(Mandatory = $true)][string]$Adb,
     [Parameter(Mandatory = $true)][string[]]$Seriais,
     [string[]]$Modelos = @(),
@@ -421,6 +425,31 @@ try {
                 $marca = if ($okCoded -eq 3) { 'OK   ' } else { 'AVISO' }
                 $resultados.Add("$marca Coded: $(Nome $cli) procurando em $phy`: $okCoded de 3$(if ($codigos) { " (falhas: $($codigos -join '; '))" })")
             }
+        }
+        PararTodos @($a, $b)
+    }
+
+    if ($Modo -eq 'Mensagem') {
+        $a = $Seriais[0]; $b = $Seriais[1]
+        Write-Host '.. calibracao a 1 m antes da mensagem'
+        PararTodos @($a, $b)
+        Anunciar $a | Out-Null
+        $r = Rodada $b 'acao=calibrar phy=1M prioridade=PADRAO volta=NOTIFICACAO' '1 m, antes da mensagem'
+        if ($r.Desfecho -ne 'calibracao_OK') { throw "a calibracao antes da mensagem nao deu OK ($($r.Desfecho) $($r.Codigo))" }
+        foreach ($par in @(@($a, $b), @($b, $a))) {
+            $srv = $par[0]; $cli = $par[1]
+            Write-Host ".. mensagem: $(Nome $srv) anuncia, $(Nome $cli) procura (1 m)"
+            PararTodos @($a, $b)
+            Anunciar $srv | Out-Null
+            $okMsg = 0; $codigos = @()
+            foreach ($combo in @('phy=1M prioridade=PADRAO', 'phy=CODED prioridade=ALTA')) {
+                foreach ($tam in @(256, 1024, 4096)) {
+                    $r = Rodada $cli "acao=procurar $combo volta=NOTIFICACAO repeticoes=5 bytes=$tam" "mensagem $tam bytes, $(Nome $srv) anuncia"
+                    if ($r.Desfecho -eq 'ok') { $okMsg++ } else { $codigos += "$tam bytes $(($combo -split ' ')[0] -replace 'phy=', ''): $($r.Desfecho) $($r.Codigo)".Trim() }
+                }
+            }
+            $marca = if ($okMsg -eq 6) { 'OK   ' } else { 'AVISO' }
+            $resultados.Add("$marca mensagem: $(Nome $cli) procurando: $okMsg de 6 rodadas$(if ($codigos) { " (falhas: $($codigos -join '; '))" })")
         }
         PararTodos @($a, $b)
     }
